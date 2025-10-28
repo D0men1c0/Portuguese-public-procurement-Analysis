@@ -349,6 +349,178 @@ class DataPreprocessor:
         ax.set_title('Distribuzione dei Criteri di Aggiudicazione (Pie Chart)')
         self._save_plot(fig, '09_award_criteria_pie.png')
         plt.show()
+        
+    def generate_pdf_report(self, output_path: str = None) -> None:
+        """Genera un report multipagina in PDF contenente i grafici principali e una sintesi delle tecniche di visualizzazione.
+
+        Il report include:
+        - Copertina con titolo e descrizione breve.
+        - Grafico a barre dei valori mancanti (Bar Chart).
+        - Numero contratti per distretto (Bar Chart).
+        - Distribuzione dei criteri di aggiudicazione (Pie Chart).
+        - Distribuzione del prezzo per criterio (Violin Plot).
+        - Andamento temporale (Line Chart con doppio asse).
+        - Heatmap di correlazione (Heatmap).
+        - Word Cloud (se disponibile).
+        - Pagina conclusiva con i concetti/tecniche chiave (Overview of Techniques).
+
+        Args:
+            output_path: Percorso del file PDF da generare. Se None, salva in 'plots/PPP_report.pdf'.
+        """
+        from matplotlib.backends.backend_pdf import PdfPages
+
+        if output_path is None:
+            output_path = os.path.join(PLOTS_DIR, 'PPP_report.pdf')
+
+        print(f"Generazione report PDF: {output_path}")
+
+        # Lista di tecniche e commenti (dalla richiesta dell'utente)
+        techniques = [
+            ("Bar Chart", "Ideali per comparare quantità tra diverse categorie (dati nominali o ordinali)."),
+            ("Stacked Bar Chart", "Mostrano come un totale è suddiviso nelle sue componenti."),
+            ("Pie Chart", "Mostrano proporzioni; spesso sconsigliati per confronti precisi."),
+            ("Histogram", "Capire la distribuzione di una singola variabile numerica."),
+            ("Box Plot", "Mostra mediana, quartili e outlier."),
+            ("Scatter Plot", "Investigare correlazioni tra due variabili numeriche."),
+            ("Line Chart", "Evoluzione di una variabile nel tempo."),
+            ("Tree Map", "Visualizzare dati gerarchici in spazio limitato."),
+            ("Choropleth Map", "Mappe colorate per valori geografici (overview spaziale)."),
+            ("Word Cloud", "Visuale rapida delle parole più frequenti nel testo."),
+            ("SPLOM", "Griglia di scatter per analisi multidimensionale."),
+            ("Parallel Coordinates", "Tecnica per dati multidimensionali; utile per pattern e cluster."),
+            ("Table Lens", "Tabella visiva che sostituisce numeri con barre per pattern e outlier.")
+        ]
+
+        with PdfPages(output_path) as pdf:
+            # Cover page
+            try:
+                fig = plt.figure(figsize=(11.69, 8.27))
+                fig.text(0.5, 0.6, 'PPP Portugal - Preprocessing & Visualizations', ha='center', fontsize=20, weight='bold')
+                fig.text(0.5, 0.5, 'Report generato automaticamente: dati, preprocessing e visualizzazioni chiave.', ha='center', fontsize=12)
+                fig.text(0.5, 0.4, f'Totale righe: {len(self.df):,}', ha='center', fontsize=10)
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Impossibile creare la copertina del PDF:', e)
+
+            # Missing values bar chart
+            try:
+                missing_percentage = self.df.isnull().sum() * 100 / max(len(self.df), 1)
+                missing_df = pd.DataFrame({'column_name': self.df.columns, 'percent_missing': missing_percentage})
+                missing_df.sort_values('percent_missing', inplace=True, ascending=False)
+                fig, ax = plt.subplots(figsize=(11, 8))
+                sns.barplot(x='percent_missing', y='column_name', data=missing_df[missing_df['percent_missing'] > 0], ax=ax)
+                ax.set_title('Percentuale di Valori Mancanti per Colonna (Bar Chart)')
+                ax.set_xlabel('Percentuale mancante (%)')
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Skipping missing values plot for PDF:', e)
+
+            # Contracts per District (horizontal bar)
+            try:
+                fig, ax = plt.subplots(figsize=(11, 8))
+                district_counts = self.df['District'].value_counts().dropna()
+                sns.barplot(x=district_counts.values, y=district_counts.index, palette='viridis', ax=ax)
+                ax.set_title('Numero di Contratti per Distretto (Bar Chart)')
+                ax.set_xlabel('Numero contratti')
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Skipping district counts plot for PDF:', e)
+
+            # Award criteria pie
+            try:
+                fig, ax = plt.subplots(figsize=(8, 8))
+                award_counts = self.df['Award criteria class'].value_counts().dropna()
+                ax.pie(award_counts, labels=award_counts.index, autopct='%1.1f%%', startangle=140, colors=sns.color_palette('plasma', len(award_counts)))
+                ax.set_title('Distribuzione dei Criteri di Aggiudicazione (Pie Chart)')
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Skipping award criteria pie for PDF:', e)
+
+            # Violin plot: price by award criteria
+            try:
+                fig, ax = plt.subplots(figsize=(11, 8))
+                sns.violinplot(x='Award criteria class', y='Base Bid Price (€)', data=self.df, palette='viridis', ax=ax)
+                ax.set_title('Distribuzione del Prezzo Base per Criterio (Violin Plot)')
+                ax.set_yscale('log')
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Skipping violin plot for PDF:', e)
+
+            # Temporal trend
+            try:
+                temporal_df = self.df.groupby('Signing Year').agg(num_contracts=('Signing Year', 'size'), avg_price=('Base Bid Price (€)', 'mean')).reset_index()
+                fig, ax1 = plt.subplots(figsize=(11, 6))
+                ax1.plot(temporal_df['Signing Year'], temporal_df['num_contracts'], marker='o', color='tab:blue')
+                ax1.set_xlabel('Anno')
+                ax1.set_ylabel('Numero Contratti', color='tab:blue')
+                ax2 = ax1.twinx()
+                ax2.plot(temporal_df['Signing Year'], temporal_df['avg_price'], marker='x', color='tab:red', linestyle='--')
+                ax2.set_ylabel('Prezzo Medio Base (€)', color='tab:red')
+                ax1.set_title('Andamento Temporale: Numero Contratti e Prezzo Medio (Line Chart)')
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Skipping temporal trend plot for PDF:', e)
+
+            # Heatmap correlation
+            try:
+                corr_cols = [
+                    'Base Bid Price (€)',
+                    'Execution deadline (days)_numeric',
+                    'Diference between close and signing dates_numeric',
+                    'Difference between the effective and initial price (€)_numeric',
+                    'Signing Year'
+                ]
+                available = [c for c in corr_cols if c in self.df.columns]
+                if len(available) > 1:
+                    corr_matrix = self.df[available].corr()
+                    fig, ax = plt.subplots(figsize=(10, 8))
+                    sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm', ax=ax)
+                    ax.set_title('Heatmap di Correlazione tra Feature Numeriche')
+                    pdf.savefig(fig)
+                    plt.close(fig)
+            except Exception as e:
+                print('Skipping correlation heatmap for PDF:', e)
+
+            # Word Cloud
+            try:
+                if WordCloud is not None and 'cpvs_clean_text' in self.df.columns:
+                    text = ' '.join(self.df['cpvs_clean_text'].dropna().astype(str))
+                    if text.strip():
+                        cloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+                        fig, ax = plt.subplots(figsize=(11, 6))
+                        ax.imshow(cloud, interpolation='bilinear')
+                        ax.axis('off')
+                        ax.set_title('Word Cloud delle Keyword CPVS')
+                        pdf.savefig(fig)
+                        plt.close(fig)
+            except Exception as e:
+                print('Skipping word cloud for PDF:', e)
+
+            # Final page: techniques and principles
+            try:
+                fig = plt.figure(figsize=(11.69, 8.27))
+                fig.suptitle('Riepilogo Tecniche e Principi di Visual Analytics', fontsize=16)
+                y = 0.9
+                for name, comment in techniques:
+                    fig.text(0.05, y, f'- {name}: {comment}', fontsize=10)
+                    y -= 0.06
+                    if y < 0.1:
+                        pdf.savefig(fig)
+                        plt.close(fig)
+                        fig = plt.figure(figsize=(11.69, 8.27))
+                        y = 0.9
+                pdf.savefig(fig)
+                plt.close(fig)
+            except Exception as e:
+                print('Skipping techniques summary page for PDF:', e)
+
+        print(f"Report PDF generato in: {output_path}")
 
         # 2. Violin Plot: Prezzo Base per Criterio di Aggiudicazione
         fig, ax = plt.subplots(figsize=(12, 8))
@@ -610,6 +782,8 @@ preprocessor.save_data(CLEANED_DATA_PATH)
 
 # %% [code]
 preprocessor.generate_final_visualizations()
+preprocessor.generate_advanced_visualizations()
+preprocessor.generate_pdf_report()
 
 # %% [markdown]
 # ## Sezione Extra: Visualizzazioni Avanzate e Componenti Interattivi
