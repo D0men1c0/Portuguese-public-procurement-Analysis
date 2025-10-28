@@ -1,8 +1,8 @@
 # %% [markdown]
 # # Storytelling e Preprocessing del Dataset sugli Appalti Pubblici
 # Questo script Python, strutturato come un notebook, racconta la storia della pulizia e della preparazione di un dataset sugli appalti pubblici portoghesi.
-# L'obiettivo è trasformare dati grezzi in un formato pulito e significativo, pronto per essere esplorato con una dashboard interattiva (es. Streamlit).
-# Ogni passaggio è documentato seguendo i principi di **Visual Analytics** e **Information Seeking Mantra** (Overview first, Zoom and Filter, then Details-on-Demand).
+# L'obiettivo è trasformare dati grezzi in un formato pulito e significativo, pronto per essere esplorato con una dashboard interattiva.
+# Ogni passaggio è documentato seguendo i principi di **Visual Analytics**. In particolare, l'approccio segue l'**Information Seeking Mantra** di Shneiderman: "Overview first, Zoom and Filter, then Details-on-Demand". Si parte da una visione d'insieme per poi permettere all'utente di esplorare i dettagli.
 
 # %% [markdown]
 # ## 1. Setup dell'Ambiente
@@ -106,139 +106,20 @@ class DataPreprocessor:
         print("\n3. Prime 5 Righe:")
         print(self.df.head())
 
-        def launch_streamlit_app(self, geojson_path: str = 'Datasets/portugal_districts.geojson'):
-            """Avvia un'app Streamlit con visualizzazioni interattive basate sul dataframe preprocessato."""
-            try:
-                import streamlit as st  # type: ignore[import-not-found]
-            except ImportError:
-                print("Streamlit non disponibile: esegui 'pip install streamlit plotly' per l'app interattiva.")
-                return
-
-            if px is None:
-                st.warning("Plotly non installato: installa 'plotly' per le visualizzazioni interattive.")
-                return
-
-            st.set_page_config(page_title="PPP Portugal Analytics", layout="wide")
-            st.title("Dashboard Interattiva sugli Appalti Pubblici Portoghesi")
-
-            df_local = self.df.copy()
-
-            with st.sidebar:
-                st.header("Filtri")
-                districts = sorted(df_local['District'].dropna().unique())
-                selected_districts = st.multiselect("Seleziona i distretti", districts)
-
-                year_min, year_max = int(df_local['Signing Year'].min()), int(df_local['Signing Year'].max())
-                year_range = st.slider("Intervallo anni", min_value=year_min, max_value=year_max, value=(year_min, year_max), step=1)
-
-                if 'Base Bid Price (€)_numeric' in df_local.columns:
-                    price_min = float(df_local['Base Bid Price (€)_numeric'].min())
-                    price_max = float(df_local['Base Bid Price (€)_numeric'].max())
-                    if price_min == price_max:
-                        st.info("Prezzo base uniforme nel dataset: filtro disabilitato.")
-                        price_range = None
-                    else:
-                        price_range = st.slider("Prezzo base (€)", min_value=price_min, max_value=price_max, value=(price_min, price_max))
-                else:
-                    price_range = None
-
-                keyword = st.text_input("Filtra per keyword CPVS", "")
-
-            filtered = df_local[
-                (df_local['Signing Year'] >= year_range[0]) &
-                (df_local['Signing Year'] <= year_range[1])
-            ]
-
-            if selected_districts:
-                filtered = filtered[filtered['District'].isin(selected_districts)]
-
-            if price_range and 'Base Bid Price (€)_numeric' in filtered.columns:
-                filtered = filtered[
-                    (filtered['Base Bid Price (€)_numeric'] >= price_range[0]) &
-                    (filtered['Base Bid Price (€)_numeric'] <= price_range[1])
-                ]
-
-            if keyword and 'cpvs_clean_text' in filtered.columns:
-                filtered = filtered[filtered['cpvs_clean_text'].str.contains(keyword, case=False, na=False)]
-
-            st.subheader("Contratti per Distretto")
-            district_counts = filtered.groupby('District').size().reset_index(name='Contracts')
-            bar_fig = px.bar(district_counts, x='District', y='Contracts', color='District', title='Numero Contratti per Distretto')
-            st.plotly_chart(bar_fig, use_container_width=True)
-
-            st.subheader("Distribuzione del Prezzo Base")
-            if 'Base Bid Price (€)_numeric' in filtered.columns:
-                hist_fig = px.histogram(filtered, x='Base Bid Price (€)_numeric', nbins=30, color='District', title='Distribuzione Prezzo Base (€)')
-                st.plotly_chart(hist_fig, use_container_width=True)
-            else:
-                st.info("Prezzo base numerico non disponibile per l'istogramma.")
-
-            if 'cpvs_sem_x' in filtered.columns:
-                st.subheader("Mappa Semantica delle Keyword CPVS")
-                sem_fig = px.scatter(
-                    filtered,
-                    x='cpvs_sem_x',
-                    y='cpvs_sem_y',
-                    color='District',
-                    hover_data=['cpvs_raw_text'],
-                    title='Embedding Semantici (Sentence-BERT + PCA)'
-                )
-                st.plotly_chart(sem_fig, use_container_width=True)
-
-            geojson_file = Path(geojson_path)
-            if geojson_file.exists() and 'Base Bid Price (€)_numeric' in filtered.columns:
-                with geojson_file.open('r', encoding='utf-8') as f:
-                    geojson_data = json.load(f)
-                geo_metrics = filtered.groupby('District').agg(
-                    contracts=('District', 'count'),
-                    base_bid_mean=('Base Bid Price (€)_numeric', 'mean')
-                ).reset_index()
-                if not geo_metrics.empty:
-                    map_fig = px.choropleth_mapbox(
-                        geo_metrics,
-                        geojson=geojson_data,
-                        locations='District',
-                        featureidkey='properties.name',
-                        color='base_bid_mean',
-                        color_continuous_scale='Plasma',
-                        mapbox_style='carto-positron',
-                        zoom=5.5,
-                        center={'lat': 39.5, 'lon': -8.0},
-                        opacity=0.7,
-                        hover_data={'contracts': True, 'base_bid_mean': ':.0f'}
-                    )
-                    map_fig.update_layout(title='Prezzo Medio Base per Distretto (Filtrato)')
-                    st.subheader("Mappa Coropletica (Interattiva)")
-                    st.plotly_chart(map_fig, use_container_width=True)
-            else:
-                st.info("Aggiungi un file GeoJSON dei distretti per visualizzare la mappa coropletica.")
-
-            if WordCloud and not filtered.empty and 'cpvs_clean_text' in filtered.columns:
-                st.subheader("Word Cloud Dinamica")
-                cloud_text = ' '.join(filtered['cpvs_clean_text'])
-                if cloud_text.strip():
-                    cloud = WordCloud(width=800, height=400, background_color='white').generate(cloud_text)
-                    fig, ax = plt.subplots(figsize=(10, 5))
-                    ax.imshow(cloud, interpolation='bilinear')
-                    ax.axis('off')
-                    st.pyplot(fig)
-                else:
-                    st.info("Nessuna keyword disponibile con i filtri correnti.")
-            elif WordCloud is None:
-                st.info("Installa 'wordcloud' per visualizzare la Word Cloud dinamica.")
-
-            csv_export = filtered.to_csv(index=False).encode('utf-8')
-            st.download_button("Scarica il dataset filtrato", data=csv_export, file_name='PPP_filtered.csv', mime='text/csv')
 
     def analyze_missing_values(self):
-        """Analizza e visualizza i valori mancanti come primo passo della quality assessment."""
+        """
+        Analizza e visualizza i valori mancanti.
+        Utilizza un Bar Chart per comparare la percentuale di valori nulli tra le diverse colonne,
+        offrendo una chiara visione d'insieme della qualità dei dati.
+        """
         missing_percentage = self.df.isnull().sum() * 100 / len(self.df)
         missing_df = pd.DataFrame({'column_name': self.df.columns, 'percent_missing': missing_percentage})
         missing_df.sort_values('percent_missing', inplace=True, ascending=False)
         
         fig, ax = plt.subplots(figsize=(12, 8))
         sns.barplot(x='percent_missing', y='column_name', data=missing_df[missing_df['percent_missing'] > 0], ax=ax)
-        ax.set_title('Percentuale di Valori Mancanti per Colonna')
+        ax.set_title('Percentuale di Valori Mancanti per Colonna (Bar Chart)')
         self._save_plot(fig, '01_missing_values_percentage.png')
         plt.show()
 
@@ -301,7 +182,12 @@ class DataPreprocessor:
         print(f"Create {len(keywords)} feature da '{text_col}'.")
 
     def process_numerical_features(self):
-        """Gestisce outlier e discretizza le colonne numeriche."""
+        """
+        Gestisce outlier e discretizza le colonne numeriche.
+        - Usa Istogrammi e Box Plot per analizzare la distribuzione e identificare outlier.
+        - Il Box Plot è eccellente per mostrare mediana, quartili e valori anomali.
+        - Gli outlier vengono rimossi per evitare visualizzazioni ingannevoli.
+        """
         numerical_cols = {
             'Diference between close and signing dates': ['Short', 'Medium', 'Long'],
             'Execution deadline (days)': ['Short', 'Medium', 'Long']
@@ -312,9 +198,9 @@ class DataPreprocessor:
             fig, axes = plt.subplots(1, 2, figsize=(12, 4))
             fig.suptitle(f'Analisi Distribuzione: {col}', fontsize=14)
             sns.histplot(self.df[col], kde=True, ax=axes[0])
-            axes[0].set_title('Istogramma')
+            axes[0].set_title('Istogramma (Distribuzione)')
             sns.boxplot(x=self.df[col], ax=axes[1])
-            axes[1].set_title('Box Plot')
+            axes[1].set_title('Box Plot (Identificazione Outlier)')
             self._save_plot(fig, f'02_distribution_{col.replace(" ", "_")}.png')
             plt.show()
 
@@ -329,8 +215,9 @@ class DataPreprocessor:
             self.df[f'{col}_numeric'] = self.df[col]
             self.df[col] = pd.qcut(self.df[col], len(labels), labels=labels, duplicates='drop')
 
-        self.df['Base Bid Price (€)_numeric'] = pd.to_numeric(self.df['Base Bid Price (€)'], errors='coerce')
-        self.df['Base Bid Price (€)'] = pd.qcut(self.df['Base Bid Price (€)_numeric'], 3, labels=['Low', 'Medium', 'High'])
+        self.df['Base Bid Price (€)'] = pd.to_numeric(self.df['Base Bid Price (€)'], errors='coerce')
+        self.df['Base Bid Price (€)_category'] = pd.qcut(self.df['Base Bid Price (€)'], 3, labels=['Low', 'Medium', 'High'])
+        
         diff_numeric = pd.to_numeric(self.df['Difference between the effective and initial price (€)'], errors='coerce')
         self.df['Difference between the effective and initial price (€)_numeric'] = diff_numeric
         self.df['Difference between the effective and initial price class'] = pd.qcut(diff_numeric, 3, labels=['Low', 'Medium', 'High'], duplicates='drop')
@@ -368,7 +255,7 @@ class DataPreprocessor:
         
         plot_specs = [
             {'col': 'Award criteria class', 'ax': axes[0, 0], 'title': 'Classe Criteri di Aggiudicazione'},
-            {'col': 'Base Bid Price (€)', 'ax': axes[0, 1], 'title': 'Prezzo Base (Discretizzato)'},
+            {'col': 'Base Bid Price (€)_category', 'ax': axes[0, 1], 'title': 'Prezzo Base (Discretizzato)'},
             {'col': 'Execution deadline (days)', 'ax': axes[1, 0], 'title': 'Scadenza Esecuzione (Discretizzato)'},
             {'col': 'Diference between close and signing dates', 'ax': axes[1, 1], 'title': 'Differenza Date (Discretizzata)'}
         ]
@@ -399,9 +286,9 @@ class DataPreprocessor:
         with geojson_file.open('r', encoding='utf-8') as f:
             districts_geojson = json.load(f)
 
-        metrics = self.df.groupby('District').agg(
+        geo_metrics = self.df.groupby('District').agg(
             contracts=('District', 'count'),
-            base_bid_mean=('Base Bid Price (€)_numeric', 'mean'),
+            base_bid_mean=('Base Bid Price (€)', 'mean'),
             execution_deadline_mode=('Execution deadline (days)', lambda x: x.mode().iloc[0] if not x.mode().empty else np.nan)
         ).reset_index()
 
@@ -449,6 +336,190 @@ class DataPreprocessor:
         print(f"Embedding Sentence-BERT calcolati e ridotti a 2 componenti per '{text_col}'.")
         return True
 
+    def generate_advanced_visualizations(self):
+        """Genera visualizzazioni avanzate per un'analisi più approfondita."""
+        print("\n--- Generazione Visualizzazioni Avanzate ---")
+
+        # 1. Pie Chart per 'Award criteria class'
+        # Il Pie Chart mostra le proporzioni (parti di un tutto).
+        # Sebbene spesso sconsigliato, qui è efficace per una visione rapida della predominanza di una categoria.
+        fig, ax = plt.subplots(figsize=(10, 8))
+        award_counts = self.df['Award criteria class'].value_counts()
+        ax.pie(award_counts, labels=award_counts.index, autopct='%1.1f%%', startangle=140, colors=sns.color_palette('plasma', len(award_counts)))
+        ax.set_title('Distribuzione dei Criteri di Aggiudicazione (Pie Chart)')
+        self._save_plot(fig, '09_award_criteria_pie.png')
+        plt.show()
+
+        # 2. Violin Plot: Prezzo Base per Criterio di Aggiudicazione
+        fig, ax = plt.subplots(figsize=(12, 8))
+        sns.violinplot(x='Award criteria class', y='Base Bid Price (€)', data=self.df, palette='viridis', ax=ax)
+        ax.set_title('Distribuzione del Prezzo Base per Criterio di Aggiudicazione')
+        ax.set_yscale('log')
+        ax.set_ylabel('Prezzo Base (€) (Scala Logaritmica)')
+        self._save_plot(fig, '10_price_distribution_by_award_criteria.png')
+        plt.show()
+
+        # 3. Line Chart: Andamento Temporale
+        # Il Line Chart è la scelta standard per visualizzare l'evoluzione di una variabile nel tempo.
+        # Qui mostriamo il numero di contratti e il prezzo medio anno per anno.
+        temporal_df = self.df.groupby('Signing Year').agg(
+            num_contracts=('Signing Year', 'size'),
+            avg_price=('Base Bid Price (€)', 'mean')
+        ).reset_index()
+        
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+        ax1.set_title('Andamento Temporale dei Contratti e Prezzo Medio')
+        
+        color = 'tab:blue'
+        ax1.set_xlabel('Anno di Firma')
+        ax1.set_ylabel('Numero di Contratti', color=color)
+        ax1.plot(temporal_df['Signing Year'], temporal_df['num_contracts'], color=color, marker='o', label='Numero Contratti')
+        ax1.tick_params(axis='y', labelcolor=color)
+
+        ax2 = ax1.twinx()
+        color = 'tab:red'
+        ax2.set_ylabel('Prezzo Medio Base (€)', color=color)
+        ax2.plot(temporal_df['Signing Year'], temporal_df['avg_price'], color=color, marker='x', linestyle='--', label='Prezzo Medio')
+        ax2.tick_params(axis='y', labelcolor=color)
+        
+        fig.tight_layout()
+        self._save_plot(fig, '11_temporal_trends.png')
+        plt.show()
+
+        # 4. Heatmap di Correlazione
+        corr_cols = [
+            'Base Bid Price (€)',
+            'Execution deadline (days)_numeric',
+            'Diference between close and signing dates_numeric',
+            'Difference between the effective and initial price (€)_numeric',
+            'Signing Year'
+        ]
+        corr_matrix = self.df[corr_cols].corr()
+        
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm', ax=ax)
+        ax.set_title('Heatmap di Correlazione tra Feature Numeriche')
+        self._save_plot(fig, '12_correlation_heatmap.png')
+        plt.show()
+        
+    def launch_streamlit_app(self, geojson_path: str = 'Datasets/portugal_districts.geojson'):
+        """Avvia un'app Streamlit con visualizzazioni interattive basate sul dataframe preprocessato."""
+        try:
+            import streamlit as st
+        except ImportError:
+            print("Streamlit non disponibile: esegui 'pip install streamlit plotly' per l'app interattiva.")
+            return
+
+        if px is None:
+            st.warning("Plotly non installato: installa 'plotly' per le visualizzazioni interattive.")
+            return
+
+        st.set_page_config(page_title="PPP Portugal Analytics", layout="wide")
+        st.title("Dashboard Interattiva sugli Appalti Pubblici Portoghesi")
+
+        df_local = self.df.copy()
+
+        with st.sidebar:
+            st.header("Filtri (Zoom and Filter)")
+            districts = sorted(df_local['District'].dropna().unique())
+            selected_districts = st.multiselect("Seleziona i distretti", districts)
+
+            year_min, year_max = int(df_local['Signing Year'].min()), int(df_local['Signing Year'].max())
+            year_range = st.slider("Intervallo anni", min_value=year_min, max_value=year_max, value=(year_min, year_max), step=1)
+
+            price_min = float(df_local['Base Bid Price (€)'].min())
+            price_max = float(df_local['Base Bid Price (€)'].max())
+            if price_min == price_max:
+                st.info("Prezzo base uniforme nel dataset: filtro disabilitato.")
+                price_range = None
+            else:
+                price_range = st.slider("Prezzo base (€)", min_value=price_min, max_value=price_max, value=(price_min, price_max))
+
+            keyword = st.text_input("Filtra per keyword CPVS", "")
+
+        filtered = df_local[
+            (df_local['Signing Year'] >= year_range[0]) &
+            (df_local['Signing Year'] <= year_range[1])
+        ]
+
+        if selected_districts:
+            filtered = filtered[filtered['District'].isin(selected_districts)]
+
+        if price_range:
+            filtered = filtered[
+                (filtered['Base Bid Price (€)'] >= price_range[0]) &
+                (filtered['Base Bid Price (€)'] <= price_range[1])
+            ]
+
+        if keyword and 'cpvs_clean_text' in filtered.columns:
+            filtered = filtered[filtered['cpvs_clean_text'].str.contains(keyword, case=False, na=False)]
+
+        st.subheader("Contratti per Distretto (Bar Chart)")
+        district_counts = filtered.groupby('District').size().reset_index(name='Contracts')
+        bar_fig = px.bar(district_counts, x='District', y='Contracts', color='District', title='Numero Contratti per Distretto')
+        st.plotly_chart(bar_fig, use_container_width=True)
+
+        st.subheader("Distribuzione del Prezzo Base (Istogramma)")
+        hist_fig = px.histogram(filtered, x='Base Bid Price (€)', nbins=30, color='District', title='Distribuzione Prezzo Base (€)')
+        st.plotly_chart(hist_fig, use_container_width=True)
+
+        if 'cpvs_sem_x' in filtered.columns:
+            st.subheader("Mappa Semantica delle Keyword CPVS (Scatter Plot)")
+            sem_fig = px.scatter(
+                filtered,
+                x='cpvs_sem_x',
+                y='cpvs_sem_y',
+                color='District',
+                hover_data=['cpvs_raw_text'],
+                title='Embedding Semantici (Details-on-Demand)'
+            )
+            st.plotly_chart(sem_fig, use_container_width=True)
+
+        geojson_file = Path(geojson_path)
+        if geojson_file.exists():
+            with geojson_file.open('r', encoding='utf-8') as f:
+                geojson_data = json.load(f)
+            geo_metrics = filtered.groupby('District').agg(
+                contracts=('District', 'count'),
+                base_bid_mean=('Base Bid Price (€)', 'mean')
+            ).reset_index()
+            if not geo_metrics.empty:
+                map_fig = px.choropleth_mapbox(
+                    geo_metrics,
+                    geojson=geojson_data,
+                    locations='District',
+                    featureidkey='properties.name',
+                    color='base_bid_mean',
+                    color_continuous_scale='Plasma',
+                    mapbox_style='carto-positron',
+                    zoom=5.5,
+                    center={'lat': 39.5, 'lon': -8.0},
+                    opacity=0.7,
+                    hover_data={'contracts': True, 'base_bid_mean': ':.0f'}
+                )
+                map_fig.update_layout(title='Prezzo Medio Base per Distretto (Filtrato)')
+                st.subheader("Mappa Coropletica (Interattiva)")
+                st.plotly_chart(map_fig, use_container_width=True)
+        else:
+            st.info("Aggiungi un file GeoJSON dei distretti per visualizzare la mappa coropletica.")
+
+        if WordCloud and not filtered.empty and 'cpvs_clean_text' in filtered.columns:
+            st.subheader("Word Cloud Dinamica")
+            cloud_text = ' '.join(filtered['cpvs_clean_text'])
+            if cloud_text.strip():
+                cloud = WordCloud(width=800, height=400, background_color='white').generate(cloud_text)
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.imshow(cloud, interpolation='bilinear')
+                ax.axis('off')
+                st.pyplot(fig)
+            else:
+                st.info("Nessuna keyword disponibile con i filtri correnti.")
+        elif WordCloud is None:
+            st.info("Installa 'wordcloud' per visualizzare la Word Cloud dinamica.")
+
+        csv_export = filtered.to_csv(index=False).encode('utf-8')
+        st.download_button("Scarica il dataset filtrato", data=csv_export, file_name='PPP_filtered.csv', mime='text/csv')
+        
 # %% [markdown]
 # ## Inizio della Pipeline di Storytelling
 # Ora istanziamo la nostra classe e invochiamo i metodi in sequenza, ispezionando il risultato ad ogni passo.
@@ -469,8 +540,8 @@ preprocessor.inspect_dataframe("Stato Iniziale del DataFrame")
 preprocessor.analyze_missing_values()
 
 # %% [markdown]
-# **Risultato:** Il grafico mostra diverse colonne con oltre il 50% di dati mancanti, rendendole inaffidabili.
-# **Azione:** Procediamo a rimuoverle, insieme a identificatori e testo non utile, per massimizzare il **Data-Ink Ratio**.
+# **Risultato:** Il **Bar Chart** mostra chiaramente diverse colonne con oltre il 50% di dati mancanti, rendendole inaffidabili.
+# **Azione:** Procediamo a rimuoverle. Questa azione segue il principio del **Data-Ink Ratio** di Tufte: massimizziamo l'inchiostro usato per i dati rilevanti ed eliminiamo il "rumore" (chartjunk e dati inutili).
 
 # %% [code]
 columns_to_drop = [
@@ -512,7 +583,7 @@ preprocessor.compute_semantic_embeddings('cpvs_clean_text', prefix='cpvs_sem')
 
 # %% [markdown]
 # ### Fase 5: Gestione Outlier e Discretizzazione
-# Analizziamo e trattiamo le variabili numeriche per migliorarne la rappresentazione ed evitare **deceptive visualizations**.
+# Analizziamo e trattiamo le variabili numeriche. L'uso combinato di **Istogrammi** e **Box Plot** ci permette di capire la distribuzione e identificare visivamente gli outlier, che vengono poi rimossi per evitare analisi distorte.
 
 # %% [code]
 preprocessor.process_numerical_features()
@@ -535,7 +606,7 @@ preprocessor.save_data(CLEANED_DATA_PATH)
 
 # %% [markdown]
 # ### Fase 8: Visualizzazioni di Riepilogo
-# Concludiamo con una "Overview" del dataset finale, pronta per la fase di "Zoom and Filter" in una dashboard.
+# Concludiamo con una "Overview" del dataset finale, utilizzando **Bar Chart** e altri grafici per riassumere le distribuzioni delle feature chiave. Questo prepara il terreno per la fase di "Zoom and Filter" in una dashboard.
 
 # %% [code]
 preprocessor.generate_final_visualizations()
@@ -546,14 +617,15 @@ preprocessor.generate_final_visualizations()
 
 # %% [markdown]
 # ### Mappa Coropletica (Plotly Mapbox)
-# Rappresentiamo il prezzo medio per distretto su mappa, seguendo il principio "Overview first".
+# Una **Choropleth Map** è perfetta per dare una visione d'insieme geografica. Le regioni sono colorate in base a un valore (in questo caso, il prezzo medio), permettendo un'analisi spaziale immediata.
+# L'interattività permette il "Details-on-Demand" passando il mouse sulle aree.
 
 # %% [code]
 preprocessor.generate_geospatial_visualizations()
 
 # %% [markdown]
 # ### Word Cloud delle Keyword CPVS
-# Visualizziamo la frequenza delle keyword estratte via TF-IDF, utile per scoprire pattern testuali.
+# La **Word Cloud** offre una visualizzazione d'impatto per mostrare la frequenza delle parole chiave nel testo delle descrizioni CPVS. Le parole più grandi sono le più frequenti, rivelando i temi principali.
 
 # %% [code]
 if WordCloud and 'cpvs_clean_text' in preprocessor.df.columns:
@@ -574,7 +646,7 @@ elif WordCloud is None:
 
 # %% [markdown]
 # ### Scatter Plot Semantico (Sentence-BERT + PCA)
-# Riduciamo gli embedding in 2D per analizzare cluster e correlazioni tra descrizioni CPVS.
+# Questo **Scatter Plot** visualizza la relazione tra le descrizioni CPVS in uno spazio semantico. È uno strumento potente per investigare cluster e similarità tra appalti basandosi sul loro significato, non solo sulle keyword.
 
 # %% [code]
 if px is not None and {'cpvs_sem_x', 'cpvs_sem_y'}.issubset(preprocessor.df.columns):
@@ -594,13 +666,13 @@ else:
 
 # %% [markdown]
 # ### Scatter Plot Numerico (Plotly)
-# Esploriamo la relazione tra prezzo base e scadenza d'esecuzione con un grafico interattivo.
+# Lo **Scatter Plot** è il grafico principe per investigare la correlazione tra due variabili numeriche. Qui esploriamo la relazione tra prezzo e deadline, con la possibilità di vedere dettagli (anno) tramite "Details-on-Demand".
 
 # %% [code]
-if px is not None and {'Base Bid Price (€)_numeric', 'Execution deadline (days)_numeric'}.issubset(preprocessor.df.columns):
+if px is not None and {'Base Bid Price (€)', 'Execution deadline (days)_numeric'}.issubset(preprocessor.df.columns):
     numeric_scatter = px.scatter(
         preprocessor.df,
-        x='Base Bid Price (€)_numeric',
+        x='Base Bid Price (€)',
         y='Execution deadline (days)_numeric',
         color='District',
         title='Prezzo Base vs Deadline di Esecuzione',
@@ -614,7 +686,11 @@ elif px is None:
 
 # %% [markdown]
 # ### Avvio della Dashboard Streamlit (Opzionale)
-# Esegui `streamlit run preProcessData_story.py -- --streamlit` per attivare la modalità interattiva con filtri dinamici.
+# Esegui `streamlit run preProcessData_story.py -- --streamlit` per attivare la modalità interattiva.
+# La dashboard implementa pienamente l'Information Seeking Mantra:
+# 1. **Overview first**: Le mappe e i grafici iniziali offrono una visione d'insieme.
+# 2. **Zoom and Filter**: I controlli nella sidebar (slider, multiselect) permettono **Filtri** e **Dynamic Queries**.
+# 3. **Details-on-Demand**: I tooltip sui grafici Plotly forniscono dettagli al passaggio del mouse.
 
 # %% [code]
 if '--streamlit' in sys.argv:
