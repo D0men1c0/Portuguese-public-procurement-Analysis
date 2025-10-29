@@ -623,6 +623,36 @@ class DataPreprocessor:
         ax.set_title('Heatmap di Correlazione tra Feature Numeriche')
         self._save_plot(fig, '12_correlation_heatmap.png')
         plt.show()
+
+    def generate_price_intensity_plot(self):
+        """
+        Crea uno scatter plot interattivo per analizzare l'intensità del prezzo.
+        Questo grafico mette in relazione il valore totale di un appalto con il suo 'prezzo al giorno',
+        permettendo di identificare contratti ad alta intensità economica.
+        """
+        if px is None or 'Price per Day' not in self.df.columns:
+            print("Plotly non disponibile o 'Price per Day' non calcolato. Salto il grafico di intensità.")
+            return
+
+        print("Generazione grafico intensità del prezzo...")
+        fig = px.scatter(
+            self.df.sample(min(1000, len(self.df))),  # Usa un campione per reattività
+            x='Base Bid Price (€)',
+            y='Price per Day',
+            color='District',
+            title='Intensità del Prezzo: Prezzo Base vs. Prezzo al Giorno',
+            hover_data=['cpvs_raw_text', 'Signing Year'],
+            log_x=True,
+            log_y=True
+        )
+        fig.update_layout(
+            xaxis_title='Prezzo Base (€) (Scala Log)',
+            yaxis_title='Prezzo al Giorno (€) (Scala Log)'
+        )
+        
+        intensity_path = os.path.join(PLOTS_DIR, '18_price_intensity_scatter.html')
+        fig.write_html(intensity_path)
+        print(f"Grafico di intensità del prezzo salvato in: {intensity_path}")
         
     def launch_streamlit_app(self, geojson_path: str = 'Datasets/portugal_districts.geojson'):
         """Avvia un'app Streamlit con visualizzazioni interattive basate sul dataframe preprocessato."""
@@ -696,6 +726,24 @@ class DataPreprocessor:
                 title='Embedding Semantici (Details-on-Demand)'
             )
             st.plotly_chart(sem_fig, use_container_width=True)
+
+        if 'Price per Day' in filtered.columns:
+            st.subheader("Analisi Intensità del Prezzo (Scatter Plot)")
+            intensity_fig = px.scatter(
+                filtered.sample(min(1000, len(filtered))),
+                x='Base Bid Price (€)',
+                y='Price per Day',
+                color='District',
+                title='Intensità del Prezzo: Prezzo Base vs. Prezzo al Giorno',
+                hover_data=['cpvs_raw_text'],
+                log_x=True,
+                log_y=True
+            )
+            intensity_fig.update_layout(
+                xaxis_title='Prezzo Base (€) (Scala Log)',
+                yaxis_title='Prezzo al Giorno (€) (Scala Log)'
+            )
+            st.plotly_chart(intensity_fig, use_container_width=True)
 
         geojson_file = Path(geojson_path)
         if geojson_file.exists():
@@ -902,11 +950,12 @@ preprocessor.inspect_dataframe("Stato del DataFrame dopo il Clustering")
 
 # %% [code]
 preprocessor.process_numerical_features()
-preprocessor.inspect_dataframe("Stato del DataFrame dopo la Gestione degli Outlier")
+preprocessor.engineer_financial_features()
+preprocessor.inspect_dataframe("Stato del DataFrame dopo la Gestione degli Outlier e Feature Finanziarie")
 
 # %% [markdown]
 # ### Fase 6: Imputazione Finale
-# Completiamo il dataset riempiendo gli ultimi valori mancanti per avere una base dati solida.
+# Si completa il dataset riempiendo gli ultimi valori mancanti per avere una base dati solida per l'analisi. L'imputazione viene eseguita usando la mediana per le variabili numeriche, una scelta robusta che non è influenzata da valori anomali.
 
 # %% [code]
 preprocessor.impute_and_finalize()
@@ -926,11 +975,12 @@ preprocessor.save_data(CLEANED_DATA_PATH)
 # %% [code]
 preprocessor.generate_final_visualizations()
 preprocessor.generate_advanced_visualizations()
+preprocessor.generate_price_intensity_plot()
 preprocessor.generate_pdf_report()
 
 # %% [markdown]
 # ## Sezione Extra: Visualizzazioni Avanzate e Componenti Interattivi
-# Estendiamo lo storytelling con grafici interattivi, mappe geografiche e analisi semantiche.
+# Questa sezione estende lo storytelling con grafici interattivi, mappe geografiche e analisi semantiche, che sono fondamentali per un'esplorazione più libera e approfondita.
 
 # %% [markdown]
 # ### Mappa Coropletica (Plotly Mapbox)
