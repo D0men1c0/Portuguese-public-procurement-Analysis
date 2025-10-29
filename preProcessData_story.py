@@ -336,6 +336,56 @@ class DataPreprocessor:
         print(f"Embedding Sentence-BERT calcolati e ridotti a 2 componenti per '{text_col}'.")
         return True
 
+    def perform_text_clustering(self, n_clusters: int = 5, random_state: int = 42):
+        """
+        Esegue il clustering K-Means sugli embedding semantici del testo.
+        Questo aiuta a raggruppare gli appalti in cluster tematici basati sul significato delle descrizioni CPVS.
+
+        Args:
+            n_clusters: Il numero di cluster da creare.
+        """
+        if 'cpvs_sem_x' not in self.df.columns or 'cpvs_sem_y' not in self.df.columns:
+            print("Embedding semantici non trovati. Salto il clustering.")
+            return
+
+        from sklearn.cluster import KMeans
+
+        print(f"Esecuzione del clustering K-Means con {n_clusters} cluster...")
+        
+        kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+        
+        # Assicurati che non ci siano NaN
+        embedding_data = self.df[['cpvs_sem_x', 'cpvs_sem_y']].dropna()
+        
+        self.df.loc[embedding_data.index, 'cpvs_cluster'] = kmeans.fit_predict(embedding_data)
+        self.df['cpvs_cluster'] = self.df['cpvs_cluster'].astype('category')
+        
+        print("Clustering completato. Aggiunta la colonna 'cpvs_cluster'.")
+
+    def visualize_text_clusters(self):
+        """
+        Visualizza i cluster testuali identificati tramite K-Means.
+        Usa uno Scatter Plot dove ogni punto è un appalto e il colore rappresenta il cluster di appartenenza.
+        Questo permette di vedere visivamente la separazione dei temi.
+        """
+        if 'cpvs_cluster' not in self.df.columns or px is None:
+            print("Cluster non trovati o Plotly non disponibile. Salto la visualizzazione dei cluster.")
+            return
+
+        fig = px.scatter(
+            self.df.dropna(subset=['cpvs_cluster']),
+            x='cpvs_sem_x',
+            y='cpvs_sem_y',
+            color='cpvs_cluster',
+            title='Cluster Semantici delle Descrizioni CPVS (K-Means)',
+            hover_data=['cpvs_raw_text'],
+            category_orders={"cpvs_cluster": sorted(self.df['cpvs_cluster'].unique())}
+        )
+        
+        cluster_path = os.path.join(PLOTS_DIR, '13_cpvs_semantic_clusters.html')
+        fig.write_html(cluster_path)
+        print(f"Grafico dei cluster semantici salvato in: {cluster_path}")
+
     def generate_advanced_visualizations(self):
         """Genera visualizzazioni avanzate per un'analisi più approfondita."""
         print("\n--- Generazione Visualizzazioni Avanzate ---")
@@ -692,6 +742,89 @@ class DataPreprocessor:
         csv_export = filtered.to_csv(index=False).encode('utf-8')
         st.download_button("Scarica il dataset filtrato", data=csv_export, file_name='PPP_filtered.csv', mime='text/csv')
         
+    def generate_role_based_visualizations(self):
+        """
+        Genera visualizzazioni specifiche per diversi ruoli professionali,
+        permettendo un'analisi mirata del dataset.
+        """
+        print("\n--- Generazione Visualizzazioni per Ruoli Specifici ---")
+
+        # --- Per l'Analista Finanziario ---
+        # Obiettivo: Analizzare l'impatto economico e le tendenze di costo.
+
+        # 1. Stacked Bar Chart: Valore Totale dei Contratti per Anno e Criterio di Aggiudicazione
+        # Utile per vedere come il valore totale degli appalti è distribuito tra i criteri nel tempo.
+        financial_df = self.df.groupby(['Signing Year', 'Award criteria class'])['Base Bid Price (€)'].sum().unstack().fillna(0)
+        fig, ax = plt.subplots(figsize=(14, 8))
+        financial_df.plot(kind='bar', stacked=True, ax=ax, colormap='viridis')
+        ax.set_title('Valore Totale Contratti per Anno e Criterio (Stacked Bar Chart)')
+        ax.set_ylabel('Valore Totale Base Bid Price (€)')
+        ax.set_xlabel('Anno di Firma')
+        ax.tick_params(axis='x', rotation=45)
+        ax.legend(title='Criterio di Aggiudicazione')
+        self._save_plot(fig, '14_financial_stacked_bar_value_by_year.png')
+        plt.show()
+
+        # 2. Box Plot: Confronto Prezzi per Pubblicazione EU (Dati Booleani)
+        # Il Box Plot è ottimo per comparare la distribuzione di una variabile numerica (prezzo)
+        # basata su una categoria booleana (pubblicato in EU o no).
+        if 'Published in the EU journal' in self.df.columns:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            sns.boxplot(x='Published in the EU journal', y='Base Bid Price (€)', data=self.df, ax=ax)
+            ax.set_title('Confronto Prezzo Base per Pubblicazione in Gazzetta EU')
+            ax.set_ylabel('Prezzo Base (€) (Scala Logaritmica)')
+            ax.set_xlabel('Pubblicato in Gazzetta EU (1=Sì, 0=No)')
+            ax.set_yscale('log')
+            self._save_plot(fig, '15_financial_price_vs_eu_publication.png')
+            plt.show()
+
+        # --- Per il Project Manager ---
+        # Obiettivo: Analizzare le tempistiche di esecuzione e le loro relazioni con altri fattori.
+
+        # 1. Bar Chart: Scadenza Media di Esecuzione per Distretto
+        # Permette di identificare rapidamente i distretti con tempi di esecuzione mediamente più lunghi o corti.
+        manager_df = self.df.groupby('District')['Execution deadline (days)_numeric'].mean().sort_values(ascending=False)
+        fig, ax = plt.subplots(figsize=(12, 8))
+        manager_df.plot(kind='barh', ax=ax, color=sns.color_palette('coolwarm', len(manager_df)))
+        ax.set_title('Scadenza Media di Esecuzione per Distretto (Bar Chart)')
+        ax.set_xlabel('Giorni Medi di Esecuzione')
+        ax.set_ylabel('Distretto')
+        self._save_plot(fig, '16_manager_avg_deadline_by_district.png')
+        plt.show()
+
+    def generate_additional_geospatial_plot(self, geojson_path: str = 'Datasets/portugal_districts.geojson'):
+        """
+        Crea una mappa coropletica aggiuntiva per visualizzare il numero di contratti per distretto.
+        Questo completa la mappa esistente basata sul prezzo medio.
+        """
+        if px is None or not Path(geojson_path).exists():
+            print("Plotly o GeoJSON non disponibili. Salto la mappa geospaziale aggiuntiva.")
+            return
+
+        with open(geojson_path, 'r', encoding='utf-8') as f:
+            districts_geojson = json.load(f)
+
+        geo_metrics = self.df.groupby('District').size().reset_index(name='contracts')
+
+        fig_map = px.choropleth_mapbox(
+            geo_metrics,
+            geojson=districts_geojson,
+            locations='District',
+            featureidkey='properties.name',
+            color='contracts',
+            color_continuous_scale='Plasma',
+            mapbox_style='carto-positron',
+            zoom=5.5,
+            center={'lat': 39.5, 'lon': -8.0},
+            opacity=0.7,
+            hover_data={'contracts': True}
+        )
+        fig_map.update_layout(title='Numero di Contratti per Distretto (Choropleth Map)')
+        
+        map_path = os.path.join(PLOTS_DIR, '17_map_contracts_by_district.html')
+        fig_map.write_html(map_path)
+        print(f"Mappa coropletica del numero di contratti salvata in: {map_path}")
+        
 # %% [markdown]
 # ## Inizio della Pipeline di Storytelling
 # Ora istanziamo la nostra classe e invochiamo i metodi in sequenza, ispezionando il risultato ad ogni passo.
@@ -752,6 +885,16 @@ preprocessor.inspect_dataframe("Stato del DataFrame dopo la Feature Engineering"
 
 # %% [code]
 preprocessor.compute_semantic_embeddings('cpvs_clean_text', prefix='cpvs_sem')
+
+# %% [code]
+# %% [markdown]
+# ### Fase 9: Analisi Semantica con Clustering
+# Applichiamo un algoritmo di clustering (K-Means) sugli embedding semantici per raggruppare automaticamente gli appalti in categorie tematiche. Questo ci permette di scoprire i principali tipi di lavori presenti nel dataset senza una classificazione manuale.
+
+# %% [code]
+preprocessor.perform_text_clustering(n_clusters=5)
+preprocessor.visualize_text_clusters()
+preprocessor.inspect_dataframe("Stato del DataFrame dopo il Clustering")
 
 # %% [markdown]
 # ### Fase 5: Gestione Outlier e Discretizzazione
