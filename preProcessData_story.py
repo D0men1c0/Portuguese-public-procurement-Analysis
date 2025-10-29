@@ -222,8 +222,32 @@ class DataPreprocessor:
         self.df['Difference between the effective and initial price (€)_numeric'] = diff_numeric
         self.df['Difference between the effective and initial price class'] = pd.qcut(diff_numeric, 3, labels=['Low', 'Medium', 'High'], duplicates='drop')
 
+    def engineer_financial_features(self):
+        """
+        Crea feature finanziarie derivate, come il 'prezzo al giorno'.
+        Questa metrica può aiutare a normalizzare il valore del contratto rispetto alla sua durata.
+        """
+        print("Creazione di feature finanziarie derivate...")
+        # Assicura che il denominatore non sia zero o nullo
+        deadline_numeric = self.df['Execution deadline (days)_numeric']
+        base_price = self.df['Base Bid Price (€)']
+        
+        # Calcola il prezzo al giorno solo per le righe valide
+        valid_mask = (deadline_numeric > 0) & (deadline_numeric.notna()) & (base_price.notna())
+        self.df['Price per Day'] = np.nan  # Inizializza la colonna
+        self.df.loc[valid_mask, 'Price per Day'] = base_price[valid_mask] / deadline_numeric[valid_mask]
+
+        # Gestisce i valori infiniti che potrebbero derivare da calcoli errati
+        self.df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        
+        # Imputa i valori nulli rimanenti (se presenti) con la mediana
+        if self.df['Price per Day'].isnull().any():
+            median_price_per_day = self.df['Price per Day'].median()
+            self.df['Price per Day'].fillna(median_price_per_day, inplace=True)
+            print(f"Imputati i valori mancanti di 'Price per Day' con la mediana: {median_price_per_day:.2f}")
+
     def impute_and_finalize(self):
-        """Esegue l\'imputazione finale e le ultime pulizie."""
+        """Esegue l'imputazione finale e le ultime pulizie."""
         for col in ['Submission deadline (days)', 'Classification of the multifactor criteria (%)']:
             if pd.api.types.is_numeric_dtype(self.df[col]):
                 median_val = self.df[col].median()
@@ -293,7 +317,7 @@ class DataPreprocessor:
         ).reset_index()
 
         fig_map = px.choropleth_mapbox(
-            metrics,
+            geo_metrics,
             geojson=districts_geojson,
             locations='District',
             featureidkey='properties.name',
