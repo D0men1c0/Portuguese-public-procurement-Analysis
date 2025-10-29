@@ -1,11 +1,23 @@
 # %% [markdown]
 # # Fase 1: Pulizia e Preparazione del Dataset
-# La prima fase si concentra sulla trasformazione dei dati grezzi in un dataset strutturato e pulito. Questo è un passaggio cruciale poiché la qualità dell'analisi dipende dalla qualità dei dati.
+# **Obiettivo**: Trasformare i dati grezzi in un dataset strutturato, pulito e affidabile.
+# 
+# **Perché è importante**: La qualità di qualsiasi analisi dei dati dipende in modo critico dalla qualità dei dati di input. Un preprocessing accurato ci permette di:
+# - **Rimuovere il "rumore"**: Eliminare informazioni irrilevanti o errate che potrebbero distorcere i risultati.
+# - **Standardizzare i formati**: Garantire che i dati siano coerenti (es. date, valori booleani).
+# - **Gestire i dati mancanti**: Decidere strategicamente come trattare le lacune nel dataset per non perdere informazioni preziose.
+# - **Creare feature significative**: Arricchire il dataset con nuove variabili (feature) che possono rivelare pattern nascosti.
+# 
+# In questa fase, ogni passaggio è documentato per spiegare cosa viene fatto e perché, garantendo la trasparenza e la riproducibilità dell'analisi.
 
 # %% [markdown]
 # ## 1. Setup dell'Ambiente
-# Si importano le librerie e si definiscono le costanti.
-
+# **Obiettivo**: Caricare tutte le librerie necessarie e configurare le variabili globali.
+# 
+# **Cosa facciamo**:
+# - Importiamo librerie fondamentali come `pandas` per la manipolazione dei dati, `matplotlib` e `seaborn` per le visualizzazioni, e `spacy` per il processamento del linguaggio naturale.
+# - Definiamo costanti come le directory per i grafici (`PLOTS_DIR`) e il percorso del file di output (`CLEANED_DATA_PATH`) per mantenere il codice pulito e facilmente configurabile.
+# - Inizializziamo il modello di linguaggio `en_core_web_sm` di spaCy, che ci servirà per la lemmatizzazione del testo.
 # %% [code]
 import pandas as pd
 import numpy as np
@@ -52,7 +64,14 @@ sns.set(style="whitegrid")
 
 # %% [markdown]
 # ## 2. Preprocessing Testuale
-# Si definisce una funzione per pulire e normalizzare il testo, preparandolo per l'analisi.
+# **Obiettivo**: Creare una funzione standard per pulire e normalizzare qualsiasi campo di testo.
+# 
+# **Cosa facciamo** (`preprocess_text`):
+# 1.  **Lowercase & Rimozione Punteggiatura/Numeri**: Convertiamo tutto in minuscolo e rimuoviamo punteggiatura e numeri per trattare parole come "Costruzione" e "costruzione." allo stesso modo.
+# 2.  **Lemmatizzazione**: Utilizzando spaCy, riduciamo le parole alla loro forma base (es. "running" -> "run", "studies" -> "study"). Questo aggrega parole con lo stesso significato, riducendo la dimensionalità del testo.
+# 3.  **Rimozione Stop Words**: Eliminiamo parole comuni ma poco informative (es. "the", "a", "is") che non aggiungono significato semantico.
+# 
+# **Risultato**: Una stringa di testo pulita, composta solo da parole chiave significative, pronta per essere analizzata o trasformata in feature numeriche.
 
 # %% [code]
 def preprocess_text(text: str) -> str:
@@ -66,7 +85,12 @@ def preprocess_text(text: str) -> str:
 
 # %% [markdown]
 # ## 3. La Classe `DataPreprocessor`
-# Tutta la logica di preprocessing è incapsulata in una classe per un approccio modulare e riutilizzabile.
+# **Obiettivo**: Incapsulare tutta la logica di preprocessing in una classe per un approccio modulare, riutilizzabile e organizzato.
+# 
+# **Vantaggi**:
+# - **Organizzazione**: Raggruppa tutte le funzioni correlate in un unico oggetto.
+# - **Stato**: Mantiene lo stato del DataFrame (`self.df`) internamente, evitando di passare il DataFrame come argomento a ogni funzione.
+# - **Riusabilità**: La classe può essere facilmente importata e utilizzata in altri script o notebook.
 
 # %% [code]
 class DataPreprocessor:
@@ -258,6 +282,11 @@ class DataPreprocessor:
     def visualize_text_clusters(self):
         if 'cpvs_cluster' not in self.df.columns or px is None:
             return
+        
+        # Utilizziamo una palette di colori qualitativa per massimizzare la distinzione visiva
+        num_clusters = self.df['cpvs_cluster'].nunique()
+        color_sequence = px.colors.qualitative.Vivid
+        
         fig = px.scatter(
             self.df.dropna(subset=['cpvs_cluster']),
             x='cpvs_sem_x',
@@ -265,12 +294,92 @@ class DataPreprocessor:
             color='cpvs_cluster',
             title='Cluster Semantici delle Descrizioni CPVS (K-Means)',
             hover_data=['cpvs_raw_text'],
-            category_orders={"cpvs_cluster": sorted(self.df['cpvs_cluster'].unique())}
+            category_orders={"cpvs_cluster": sorted(self.df['cpvs_cluster'].unique())},
+            color_discrete_sequence=color_sequence
         )
+        
+        # Miglioriamo la legenda e il layout
+        fig.update_layout(
+            legend_title_text='Cluster ID',
+            xaxis_title='Componente Principale 1 (Semantica)',
+            yaxis_title='Componente Principale 2 (Semantica)'
+        )
+        
         cluster_path = os.path.join(PLOTS_DIR, '13_cpvs_semantic_clusters.html')
         fig.write_html(cluster_path)
         fig.show()
         print(f"Grafico dei cluster semantici salvato in: {cluster_path}")
+
+    def analyze_award_criteria_and_price(self):
+        """
+        Genera visualizzazioni approfondite per analizzare la relazione tra
+        criteri di aggiudicazione, prezzo e altre feature.
+        """
+        print("\n--- Analisi Approfondita: Criteri di Aggiudicazione e Prezzi ---")
+
+        # 1. Box Plot: Prezzo per Criterio di Aggiudicazione
+        fig, ax = plt.subplots(figsize=(12, 8))
+        sns.boxplot(
+            x='Award criteria class',
+            y='Base Bid Price (€)',
+            data=self.df,
+            palette='Set2',
+            ax=ax,
+            hue='Award criteria class',
+            legend=False
+        )
+        ax.set_title('Distribuzione del Prezzo Base per Criterio di Aggiudicazione', fontsize=16)
+        ax.set_ylabel('Prezzo Base (€) (Scala Logaritmica)', fontsize=12)
+        ax.set_xlabel('Criterio di Aggiudicazione', fontsize=12)
+        ax.set_yscale('log')
+        ax.tick_params(axis='x', rotation=45)
+        self._save_plot(fig, '20_price_distribution_by_award_criteria.png')
+        plt.show()
+        plt.close(fig)
+
+        # 2. Bar Plot: Conteggio Criteri per Distretto
+        if 'District' in self.df.columns:
+            fig, ax = plt.subplots(figsize=(15, 10))
+            sns.countplot(
+                y='District',
+                hue='Award criteria class',
+                data=self.df,
+                order=self.df['District'].value_counts().index,
+                palette='viridis',
+                ax=ax
+            )
+            ax.set_title('Numero di Contratti per Criterio di Aggiudicazione e Distretto', fontsize=16)
+            ax.set_xlabel('Numero di Contratti', fontsize=12)
+            ax.set_ylabel('Distretto', fontsize=12)
+            ax.legend(title='Criterio di Aggiudicazione')
+            self._save_plot(fig, '21_award_criteria_by_district.png')
+            plt.show()
+            plt.close(fig)
+
+        # 3. Scatter Plot: Prezzo vs. Scadenza, colorato per Criterio
+        if px is not None and {'Base Bid Price (€)', 'Execution deadline (days)_numeric'}.issubset(self.df.columns):
+            scatter_fig = px.scatter(
+                self.df.sample(min(2000, len(self.df))), # Campiona per performance
+                x='Base Bid Price (€)',
+                y='Execution deadline (days)_numeric',
+                color='Award criteria class',
+                title='Prezzo Base vs. Scadenza di Esecuzione per Criterio di Aggiudicazione',
+                hover_data=['cpvs_raw_text', 'District'],
+                log_x=True,
+                log_y=True,
+                color_discrete_map={
+                    'Lowest price': 'blue',
+                    'Multifactor': 'red'
+                }
+            )
+            scatter_fig.update_layout(
+                xaxis_title='Prezzo Base (€) (Scala Log)',
+                yaxis_title='Scadenza Esecuzione (giorni) (Scala Log)'
+            )
+            scatter_path = os.path.join(PLOTS_DIR, '22_price_vs_deadline_by_award_criteria.html')
+            scatter_fig.write_html(scatter_path)
+            scatter_fig.show()
+            print(f"Scatter plot Prezzo vs. Scadenza per Criterio salvato.")
 
     def generate_final_visualizations(self):
         print("\n--- Generazione Visualizzazioni Finali ---")
@@ -508,7 +617,14 @@ class DataPreprocessor:
 
 # %% [markdown]
 # ### Fase 1.1: Caricamento e Ispezione Iniziale
-# Si carica il dataset e si esegue una prima ispezione.
+# **Obiettivo**: Caricare il dataset e ottenere una prima comprensione della sua struttura, dei tipi di dati e della presenza di valori nulli.
+# 
+# **Cosa facciamo**:
+# - `_load_data`: Carichiamo il file Excel in un DataFrame pandas.
+# - `inspect_dataframe`:
+    #   - `df.info()`: Mostra i tipi di dati per colonna e l'uso della memoria. Utile per identificare subito colonne con tipi errati (es. numeri letti come testo).
+    #   - `df.isnull().sum()`: Conta i valori mancanti per colonna. Fondamentale per pianificare la strategia di pulizia.
+    #   - `df.head()`: Visualizza le prime righe per avere un'idea concreta del contenuto.
 
 # %% [code]
 preprocessor = DataPreprocessor('Datasets/PPPData_EN_1.0.xlsx')
@@ -516,7 +632,16 @@ preprocessor.inspect_dataframe("Stato Iniziale del DataFrame")
 
 # %% [markdown]
 # ### Fase 1.2: Analisi e Pulizia dei Dati
-# **Finding**: Il grafico dei valori mancanti mostra che colonne come `Conclusion of a framework agreement` o `Electronic auction` sono quasi del tutto vuote. La loro rimozione è necessaria per non basare l'analisi su dati inaffidabili.
+# **Obiettivo**: Rimuovere le colonne inutili, correggere i dati e gestire le righe con informazioni critiche mancanti.
+# 
+# **Cosa facciamo**:
+# - `analyze_missing_values`: Visualizziamo la percentuale di valori mancanti. Questo ci guida nella decisione di quali colonne eliminare.
+# - `prune_columns`: Rimuoviamo le colonne con troppi valori mancanti o che sono irrilevanti per l'analisi (es. ID, colonne con un solo valore). **Decisione chiave**: colonne come `Conclusion of a framework agreement` o `Electronic auction` sono quasi vuote e non possono fornire insight affidabili.
+# - `clean_and_correct`:
+    #   - Correggiamo i tipi di dati (es. da booleano a intero).
+    #   - Rimuoviamo spazi bianchi superflui (`strip()`).
+    #   - Eliminiamo righe con dati palesemente errati (es. codici distretto incoerenti).
+    #   - `dropna(subset=key_cols)`: Rimuoviamo le righe dove mancano informazioni fondamentali come il prezzo o la municipalità, poiché sarebbero inutilizzabili.
 
 # %% [code]
 preprocessor.analyze_missing_values()
@@ -536,7 +661,14 @@ preprocessor.inspect_dataframe("Stato del DataFrame dopo Pulizia Iniziale")
 
 # %% [markdown]
 # ### Fase 1.3: Feature Engineering
-# Si creano nuove feature da date e testo per arricchire l'analisi.
+# **Obiettivo**: Creare nuove feature per arricchire il dataset e migliorare il potenziale predittivo o descrittivo del modello.
+# 
+# **Cosa facciamo**:
+# - `engineer_date_features`: Estraiamo l'anno e il mese dalle colonne di data. Questo ci permette di analizzare andamenti temporali (stagionalità, trend annuali).
+# - `engineer_text_features`:
+    #   - Applichiamo la nostra `preprocess_text` alla colonna `Cpvs Designation`.
+    #   - Usiamo `TfidfVectorizer` per trasformare il testo pulito in feature numeriche. TF-IDF assegna un peso a ogni parola in base alla sua frequenza nel documento e alla sua rarità nell'intero corpus, evidenziando i termini più caratterizzanti.
+    #   - Creiamo colonne binarie (0/1) per le 10 parole chiave più importanti, rendendo il loro impatto facilmente interpretabile.
 
 # %% [code]
 preprocessor.engineer_date_features()
@@ -546,7 +678,15 @@ preprocessor.inspect_dataframe("Stato del DataFrame dopo Feature Engineering Tes
 
 # %% [markdown]
 # ### Fase 1.4: Gestione Outlier e Feature Finanziarie
-# **Finding**: Le distribuzioni di variabili come `Execution deadline` mostrano una forte asimmetria, indicando la presenza di contratti con durate eccezionalmente lunghe. La rimozione degli outlier più estremi rende le analisi successive più robuste.
+# **Obiettivo**: Identificare e gestire valori anomali (outlier) e creare nuove feature finanziarie.
+# 
+# **Cosa facciamo**:
+# - `process_numerical_features`:
+    #   - Visualizziamo la distribuzione di feature numeriche come `Execution deadline`. **Finding**: Le distribuzioni mostrano una forte asimmetria (coda lunga a destra), indicando la presenza di contratti con durate o valori eccezionalmente alti.
+    #   - **Gestione Outlier**: Rimuoviamo gli outlier più estremi usando il metodo dell'IQR (Interquartile Range). Questo previene che pochi valori anomali distorcano le medie e le analisi successive.
+    #   - **Discretizzazione**: Convertiamo le variabili numeriche continue in categorie ordinate (es. 'Short', 'Medium', 'Long') usando `pd.qcut`. Questo semplifica l'analisi e la visualizzazione delle relazioni.
+# - `engineer_financial_features`:
+    #   - Creiamo `Price per Day`, una metrica di intensità che normalizza il costo di un progetto sulla sua durata. Questo permette di confrontare progetti di dimensioni diverse in modo più equo.
 
 # %% [code]
 preprocessor.process_numerical_features()
@@ -557,7 +697,14 @@ preprocessor.inspect_dataframe("Stato del DataFrame dopo Gestione Outlier e Feat
 
 # %% [markdown]
 # ### Fase 1.5: Imputazione Finale e Salvataggio
-# Si completano i dati e si salva il dataset pulito.
+# **Obiettivo**: Gestire gli ultimi valori mancanti e salvare il dataset pulito per un uso futuro.
+# 
+# **Cosa facciamo**:
+# - `impute_and_finalize`:
+    #   - Per le colonne numeriche rimanenti, riempiamo i valori nulli con la **mediana** invece della media, poiché la mediana è meno sensibile agli outlier.
+    #   - Per le colonne categoriche, usiamo la **moda** (il valore più frequente).
+    #   - `dropna()`: Eseguiamo una pulizia finale per rimuovere qualsiasi riga che possa ancora contenere valori nulli.
+# - `save_data`: Salviamo il DataFrame pulito in un file CSV. Questo ci permette di ricaricare direttamente i dati puliti in futuro, saltando tutti i passaggi di preprocessing.
 
 # %% [code]
 preprocessor.impute_and_finalize()
@@ -566,7 +713,10 @@ preprocessor.inspect_dataframe("Stato Finale del DataFrame")
 
 # %% [markdown]
 # ### Fase 1.6: Riepilogo Statistico
-# Si esegue un'analisi descrittiva del dataset pulito per un riepilogo quantitativo.
+# **Obiettivo**: Eseguire un'analisi descrittiva del dataset finale per avere un riepilogo quantitativo completo.
+# 
+# **Cosa facciamo**:
+# - `summarize_data`: Usiamo `df.describe(include='all')` per ottenere statistiche di base (media, mediana, deviazione standard, conteggi, valori unici) per tutte le colonne, sia numeriche che categoriche. Questo serve come un controllo di qualità finale e fornisce una panoramica immediata del dataset con cui lavoreremo.
 
 # %% [code]
 preprocessor.summarize_data()
@@ -577,7 +727,14 @@ preprocessor.summarize_data()
 
 # %% [markdown]
 # ### Fase 2.1: Analisi Semantica e Clustering
-# **Finding**: Il clustering sugli embedding semantici rivela gruppi tematici distinti. Ad esempio, si possono identificare cluster relativi a "lavori stradali", "costruzione di edifici" o "servizi di manutenzione", confermando che il modello ha catturato differenze semantiche reali.
+# **Obiettivo**: Raggruppare i contratti in cluster tematici basati sul significato delle loro descrizioni.
+# 
+# **Cosa facciamo**:
+# - `compute_semantic_embeddings`: Trasformiamo le descrizioni testuali pulite (`cpvs_clean_text`) in vettori numerici (embeddings) usando un modello pre-addestrato (`all-MiniLM-L6-v2`). Questi vettori catturano il significato semantico del testo. Usiamo PCA per ridurre la dimensionalità a 2D per la visualizzazione.
+# - `perform_text_clustering`: Applichiamo l'algoritmo K-Means sugli embedding 2D per raggruppare i contratti in `n_clusters` (in questo caso 5) gruppi distinti.
+# - `visualize_text_clusters`: Visualizziamo i cluster su uno scatter plot.
+# 
+# **Finding**: Il clustering sugli embedding semantici rivela gruppi tematici distinti. Ad esempio, si possono identificare cluster relativi a "lavori stradali", "costruzione di edifici" o "servizi di manutenzione". I colori distinti aiutano a separare visivamente questi gruppi, confermando che il modello ha catturato differenze semantiche reali.
 
 # %% [code]
 preprocessor.compute_semantic_embeddings('cpvs_clean_text', prefix='cpvs_sem')
@@ -586,21 +743,29 @@ preprocessor.visualize_text_clusters()
 
 # %% [markdown]
 # ### Fase 2.2: Visualizzazioni di Base
-# **Finding**: I grafici confermano la concentrazione di contratti a Lisbona e Porto. La maggior parte dei contratti viene aggiudicata tramite il criterio del "prezzo più basso", ma la distribuzione dei prezzi e delle scadenze è molto ampia, suggerendo una grande varietà di progetti.
+# **Obiettivo**: Ottenere una panoramica generale della distribuzione dei dati attraverso grafici semplici.
+# 
+# **Finding**: I grafici confermano la concentrazione geografica dei contratti nelle aree metropolitane di Lisbona e Porto. Emerge che la maggior parte dei contratti viene aggiudicata tramite il criterio del "prezzo più basso". Tuttavia, la distribuzione dei prezzi e delle scadenze è molto ampia, suggerendo una grande eterogeneità nei tipi e nelle dimensioni dei progetti.
 
 # %% [code]
 preprocessor.generate_final_visualizations()
 
 # %% [markdown]
 # ### Fase 2.3: Visualizzazioni Avanzate
-# **Finding**: La heatmap di correlazione mostra una debole correlazione positiva tra prezzo e scadenza, il che è intuitivo. L'andamento temporale rivela un picco di contratti in certi anni, che potrebbe essere correlato a cicli economici o iniziative governative.
+# **Obiettivo**: Esplorare le relazioni tra più variabili e analizzare gli andamenti nel tempo.
+# 
+# **Finding**:
+# - **Correlazione**: La heatmap di correlazione mostra una debole correlazione positiva tra prezzo e scadenza, il che è intuitivo (progetti più costosi tendono a durare di più). L'assenza di correlazioni forti suggerisce che le relazioni sono più complesse.
+# - **Andamento Temporale**: Il grafico temporale rivela un picco nel numero di contratti in certi anni. Questo potrebbe essere correlato a cicli economici, elezioni o lanci di specifici programmi di investimento governativi.
 
 # %% [code]
 preprocessor.generate_advanced_visualizations()
 
 # %% [markdown]
 # ### Fase 2.4: Analisi Geospaziale
-# **Finding**: Le mappe coropletiche mostrano che, sebbene Lisbona e Porto abbiano il maggior numero di contratti, il *valore medio* più alto si trova in distretti con meno contratti, come Bragança o Viana do Castelo. Questo potrebbe indicare la presenza di pochi ma grandi progetti infrastrutturali in quelle aree.
+# **Obiettivo**: Visualizzare la distribuzione geografica dei contratti e dei loro valori.
+# 
+# **Finding**: Le mappe coropletiche offrono uno degli insight più interessanti. Sebbene Lisbona e Porto abbiano il maggior *numero* di contratti, il *valore medio* più alto si trova spesso in distretti con meno contratti, come Bragança o Viana do Castelo. Questo pattern suggerisce la presenza di pochi ma grandi progetti infrastrutturali (es. dighe, autostrade) in quelle aree, a differenza della miriade di progetti più piccoli nelle grandi città.
 
 # %% [code]
 preprocessor.generate_geospatial_visualizations()
@@ -610,15 +775,22 @@ preprocessor.generate_additional_geospatial_plot()
 
 # %% [markdown]
 # ### Fase 2.5: Visualizzazioni per Ruolo
-# **Finding per Financial Analyst**: Il grafico a barre impilate mostra come il valore totale dei contratti basati sul "prezzo più basso" sia diminuito negli ultimi anni a favore di criteri multifattoriali, indicando un cambiamento nelle strategie di appalto.
-# **Finding per Project Manager**: La scadenza media di esecuzione varia significativamente tra i distretti. Questo è un dato cruciale per la pianificazione, poiché suggerisce che i tempi di progetto possono dipendere fortemente dalla località.
+# **Obiettivo**: Creare grafici mirati a rispondere a domande specifiche di diversi stakeholder.
+# 
+# **Finding per Financial Analyst**: Il grafico a barre impilate mostra come il valore totale dei contratti basati sul "prezzo più basso" sia diminuito negli ultimi anni a favore di criteri multifattoriali. Questo indica un cambiamento strategico nelle politiche di appalto, forse verso una maggiore enfasi sulla qualità oltre che sul costo.
+# 
+# **Finding per Project Manager**: La scadenza media di esecuzione varia significativamente tra i distretti. Questo è un dato cruciale per la pianificazione strategica e la gestione del rischio, poiché suggerisce che i tempi di progetto possono dipendere fortemente da fattori logistici e burocratici locali.
 
 # %% [code]
 preprocessor.generate_role_based_visualizations()
 
 # %% [markdown]
 # ### Fase 2.6: Analisi di Intensità e Testo
-# **Finding**: Il grafico di intensità del prezzo mostra che non c'è una relazione lineare semplice tra il prezzo totale e il "prezzo al giorno", suggerendo che la complessità e la durata del progetto influenzano il costo in modi non banali. La word cloud evidenzia "lavori", "costruzione" e "manutenzione" come i termini più frequenti.
+# **Obiettivo**: Analizzare la relazione tra costo e durata e visualizzare i temi principali del testo.
+# 
+# **Finding**:
+# - **Intensità del Prezzo**: Il grafico di intensità mostra che non c'è una relazione lineare semplice tra il prezzo totale e il "prezzo al giorno". Questo suggerisce che la complessità, i materiali e la manodopera influenzano il costo in modi non banali, e progetti più lunghi non sono necessariamente più costosi su base giornaliera.
+# - **Word Cloud**: La nuvola di parole evidenzia "lavori", "costruzione" e "manutenzione" come i termini più frequenti, confermando che il dataset è focalizzato correttamente sul settore delle costruzioni.
 
 # %% [code]
 preprocessor.generate_price_intensity_plot()
@@ -628,7 +800,9 @@ preprocessor.generate_word_cloud()
 
 # %% [markdown]
 # ### Fase 2.7: Scatter Plot Interattivi
-# **Finding**: Gli scatter plot interattivi permettono di esplorare le relazioni tra prezzo, scadenze e descrizioni dei progetti. Filtrando per distretto, si possono scoprire outlier e pattern specifici a livello locale.
+# **Obiettivo**: Fornire strumenti interattivi per un'esplorazione libera e dettagliata dei dati.
+# 
+# **Finding**: Gli scatter plot interattivi permettono di esplorare le relazioni tra prezzo, scadenze e descrizioni dei progetti in modo dinamico. Passando il mouse sui punti, un analista può leggere la descrizione del progetto associato a un outlier, scoprendo ad esempio che un punto con un prezzo molto alto e una durata breve corrisponde a una fornitura specializzata e non a un errore nei dati. Filtrando per distretto, si possono scoprire pattern specifici a livello locale.
 
 # %% [code]
 preprocessor.generate_semantic_scatter()
@@ -638,7 +812,21 @@ preprocessor.generate_numeric_scatter()
 
 # %% [markdown]
 # ### Fase 2.8: Creazione del Report PDF
-# Si genera un report PDF che raccoglie tutte le visualizzazioni statiche create.
+# **Obiettivo**: Consolidare tutte le visualizzazioni statiche in un unico documento portabile.
+# 
+# **Cosa facciamo**: Si genera un report PDF che raccoglie tutte le visualizzazioni statiche create, fornendo un riassunto completo dell'analisi che può essere facilmente condiviso con stakeholder che non hanno accesso all'ambiente di programmazione.
 
 # %% [code]
 preprocessor.generate_pdf_report()
+
+# %% [markdown]
+# ### Fase 2.9: Analisi Approfondita dei Criteri di Aggiudicazione
+# **Obiettivo**: Indagare come i criteri di aggiudicazione ("prezzo più basso" vs. "multifattoriale") influenzano i costi e come si distribuiscono geograficamente.
+# 
+# **Finding**:
+# - **Distribuzione Prezzi**: Il box plot mostra che, sebbene i contratti "multifattoriali" abbiano una mediana dei prezzi leggermente più alta, la variabilità è enorme in entrambi i casi. Questo suggerisce che il tipo di progetto ha un impatto maggiore sul prezzo rispetto al solo criterio di aggiudicazione.
+# - **Distribuzione Geografica**: Il grafico a barre rivela che la maggior parte dei distretti si affida prevalentemente al criterio del "prezzo più basso". Tuttavia, in centri urbani come Lisbona, la proporzione di contratti "multifattoriali" è visibilmente più alta, indicando una maggiore attenzione alla qualità e ad altri fattori oltre al costo.
+# - **Prezzo vs. Scadenza**: Lo scatter plot interattivo conferma che non esiste una regola semplice. Ci sono progetti "multifattoriali" economici e veloci, e progetti basati sul "prezzo più basso" che sono costosi e lunghi. Questo rafforza l'idea che le dinamiche di costo sono complesse e dipendono da molteplici fattori.
+
+# %% [code]
+preprocessor.analyze_award_criteria_and_price()
