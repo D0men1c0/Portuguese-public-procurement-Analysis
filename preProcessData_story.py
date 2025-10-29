@@ -356,30 +356,25 @@ class DataPreprocessor:
             plt.show()
             plt.close(fig)
 
-        # 3. Scatter Plot: Prezzo vs. Scadenza, colorato per Criterio
-        if px is not None and {'Base Bid Price (€)', 'Execution deadline (days)_numeric'}.issubset(self.df.columns):
-            scatter_fig = px.scatter(
-                self.df.sample(min(2000, len(self.df))), # Campiona per performance
+        # 3. Hexbin Plot: Densità di Prezzo vs. Scadenza per Criterio
+        if {'Base Bid Price (€)', 'Execution deadline (days)_numeric'}.issubset(self.df.columns):
+            g = sns.jointplot(
+                data=self.df,
                 x='Base Bid Price (€)',
                 y='Execution deadline (days)_numeric',
-                color='Award criteria class',
-                title='Prezzo Base vs. Scadenza di Esecuzione per Criterio di Aggiudicazione',
-                hover_data=['cpvs_raw_text', 'District'],
-                log_x=True,
-                log_y=True,
-                color_discrete_map={
-                    'Lowest price': 'blue',
-                    'Multifactor': 'red'
-                }
+                hue='Award criteria class',
+                kind='kde',
+                fill=True,
+                height=10,
+                palette='viridis'
             )
-            scatter_fig.update_layout(
-                xaxis_title='Prezzo Base (€) (Scala Log)',
-                yaxis_title='Scadenza Esecuzione (giorni) (Scala Log)'
-            )
-            scatter_path = os.path.join(PLOTS_DIR, '22_price_vs_deadline_by_award_criteria.html')
-            scatter_fig.write_html(scatter_path)
-            scatter_fig.show()
-            print(f"Scatter plot Prezzo vs. Scadenza per Criterio salvato.")
+            g.ax_joint.set_xscale('log')
+            g.ax_joint.set_yscale('log')
+            g.fig.suptitle('Densità di Prezzo vs. Scadenza per Criterio di Aggiudicazione', y=1.02)
+            g.set_axis_labels('Prezzo Base (€) (Scala Log)', 'Scadenza Esecuzione (giorni) (Scala Log)')
+            self._save_plot(g.fig, '22_price_vs_deadline_density_by_award_criteria.png')
+            plt.show()
+            plt.close(g.fig)
 
     def generate_final_visualizations(self):
         print("\n--- Generazione Visualizzazioni Finali ---")
@@ -477,19 +472,38 @@ class DataPreprocessor:
         plt.close(fig)
 
     def generate_price_intensity_plot(self):
-        if px is None or 'Price per Day' not in self.df.columns: return
-        print("Generazione grafico intensità del prezzo...")
-        fig = px.scatter(
-            self.df.sample(min(1000, len(self.df))),
-            x='Base Bid Price (€)', y='Price per Day', color='District',
-            title='Intensità del Prezzo: Prezzo Base vs. Prezzo al Giorno',
-            hover_data=['cpvs_raw_text', 'Signing Year'], log_x=True, log_y=True
+        if 'Price per Day' not in self.df.columns or 'Base Bid Price (€)' not in self.df.columns:
+            return
+        print("Generazione grafico a esagoni per l'intensità del prezzo...")
+
+        # Filtra i dati per evitare problemi con la scala logaritmica (valori <= 0)
+        plot_data = self.df[
+            (self.df['Base Bid Price (€)'] > 0) & 
+            (self.df['Price per Day'] > 0)
+        ].copy()
+
+        # Applica la trasformazione logaritmica per una migliore visualizzazione
+        plot_data['log_base_price'] = np.log10(plot_data['Base Bid Price (€)'])
+        plot_data['log_price_per_day'] = np.log10(plot_data['Price per Day'])
+
+        # Crea il jointplot con tipo 'hex'
+        g = sns.jointplot(
+            x='log_base_price',
+            y='log_price_per_day',
+            data=plot_data,
+            kind='hex',
+            cmap='viridis',
+            height=10
         )
-        fig.update_layout(xaxis_title='Prezzo Base (€) (Scala Log)', yaxis_title='Prezzo al Giorno (€) (Scala Log)')
-        intensity_path = os.path.join(PLOTS_DIR, '18_price_intensity_scatter.html')
-        fig.write_html(intensity_path)
-        fig.show()
-        print(f"Grafico di intensità del prezzo salvato.")
+        
+        g.fig.suptitle('Intensità del Prezzo: Prezzo Base vs. Prezzo al Giorno (Densità)', y=1.02, fontsize=16)
+        g.set_axis_labels('Prezzo Base (€) (Scala Log10)', 'Prezzo al Giorno (€) (Scala Log10)', fontsize=12)
+        
+        # Salva il grafico
+        self._save_plot(g.fig, '18_price_intensity_hexbin.png')
+        plt.show()
+        plt.close(g.fig)
+        print(f"Grafico di intensità del prezzo (hexbin) salvato.")
         
     def generate_role_based_visualizations(self):
         print("\n--- Generazione Visualizzazioni per Ruoli Specifici ---")
@@ -580,36 +594,104 @@ class DataPreprocessor:
             numeric_scatter.show()
             print(f"Scatter plot numerico salvato.")
 
-    def generate_pdf_report(self, output_path: str = None):
+    def generate_pdf_report(self, report_title: str = 'PPP Portugal - Report di Analisi', output_path: str = None):
         from matplotlib.backends.backend_pdf import PdfPages
+        import textwrap
+
         if output_path is None:
             output_path = os.path.join(PLOTS_DIR, 'PPP_report.pdf')
-        print(f"Generazione report PDF: {output_path}")
+        print(f"Generazione report PDF narrativo: {output_path}")
 
-        plot_files = sorted([f for f in os.listdir(PLOTS_DIR) if f.endswith('.png')])
+        # Mappatura dei nomi dei file dei grafici a titoli e descrizioni
+        plot_info = {
+            '01_missing_values_percentage.png': {
+                "title": "Analisi dei Valori Mancanti",
+                "description": "Questo grafico mostra la percentuale di dati mancanti per ogni colonna. Colonne con un'alta percentuale di valori nulli (es. 'Conclusion of a framework agreement') sono state rimosse perché non avrebbero fornito insight affidabili. Questa fase è cruciale per garantire la robustezza dell'analisi."
+            },
+            '03_district_distribution.png': {
+                "title": "Distribuzione Geografica dei Contratti",
+                "description": "Il grafico illustra il numero totale di contratti per distretto. Emerge una chiara concentrazione nelle aree metropolitane di Lisbona e Porto, che sono i principali centri economici del paese. Questo suggerisce che la maggior parte delle attività di costruzione si concentra in queste due regioni."
+            },
+            '04_key_features_distribution.png': {
+                "title": "Distribuzione delle Feature Chiave",
+                "description": "Questi grafici mostrano come si distribuiscono alcune delle variabili più importanti. La maggior parte dei contratti usa il 'prezzo più basso' come criterio di aggiudicazione. Le distribuzioni di prezzo e scadenze sono ampie, indicando una grande varietà di progetti, da piccoli lavori di manutenzione a grandi opere infrastrutturali."
+            },
+            '09_award_criteria_pie.png': {
+                "title": "Torta dei Criteri di Aggiudicazione",
+                "description": "Questa visualizzazione mostra la proporzione tra i diversi criteri di aggiudicazione. Il 'prezzo più basso' è dominante, ma una fetta significativa di contratti utilizza criteri 'multifattoriali', suggerendo che la qualità e altri fattori sono importanti in un numero non trascurabile di appalti."
+            },
+            '11_temporal_trends.png': {
+                "title": "Andamento Temporale dei Contratti",
+                "description": "Questo grafico a doppia scala mostra l'evoluzione del numero di contratti e del prezzo medio nel corso degli anni. Si possono notare picchi in determinati periodi, che potrebbero essere correlati a cicli economici, elezioni o specifici programmi di investimento governativo. Il prezzo medio, d'altra parte, mostra una sua dinamica, non sempre correlata al volume."
+            },
+            '12_correlation_heatmap.png': {
+                "title": "Heatmap di Correlazione",
+                "description": "La heatmap visualizza le correlazioni lineari tra le principali variabili numeriche. Si nota una debole correlazione positiva tra prezzo e scadenza, il che è intuitivo. L'assenza di correlazioni forti suggerisce che le relazioni tra le variabili sono complesse e non lineari, richiedendo analisi più approfondite."
+            },
+            '14_financial_stacked_bar_value_by_year.png': {
+                "title": "Valore Contratti per Anno e Criterio (Analisi Finanziaria)",
+                "description": "Questo grafico è pensato per un analista finanziario. Mostra come il valore totale dei contratti, suddiviso per criterio di aggiudicazione, è cambiato nel tempo. Si può osservare se c'è stato uno spostamento strategico dal 'prezzo più basso' a criteri 'multifattoriali', indicando un cambiamento nelle priorità di appalto verso la qualità."
+            },
+            '16_manager_avg_deadline_by_district.png': {
+                "title": "Scadenza Media per Distretto (Analisi Gestionale)",
+                "description": "Questo grafico è cruciale per un project manager. Evidenzia come la durata media dei progetti vari in modo significativo da un distretto all'altro. Questo può influenzare la pianificazione, l'allocazione delle risorse e la gestione del rischio, poiché i tempi di esecuzione sembrano dipendere da fattori logistici o burocratici locali."
+            },
+            '20_price_distribution_by_award_criteria.png': {
+                "title": "Distribuzione Prezzi per Criterio di Aggiudicazione",
+                "description": "Il box plot confronta la distribuzione dei prezzi per i contratti aggiudicati con 'prezzo più basso' rispetto a quelli 'multifattoriali'. Sebbene la mediana dei prezzi per i contratti 'multifattoriali' sia leggermente più alta, la grande dispersione (i 'baffi' del box plot) in entrambi i gruppi indica che il tipo di progetto ha probabilmente un impatto maggiore sul costo rispetto al solo criterio di aggiudicazione."
+            },
+            '21_award_criteria_by_district.png': {
+                "title": "Conteggio Criteri per Distretto",
+                "description": "Questo grafico mostra la preferenza per un criterio di aggiudicazione a livello geografico. La maggior parte dei distretti si affida prevalentemente al 'prezzo più basso'. Tuttavia, in centri urbani come Lisbona, la proporzione di contratti 'multifattoriali' è visibilmente più alta, suggerendo una maggiore enfasi sulla qualità e altri fattori oltre al semplice costo."
+            },
+            '22_price_vs_deadline_density_by_award_criteria.png': {
+                "title": "Densità Prezzo vs. Scadenza per Criterio",
+                "description": "Questo grafico di densità mostra dove si concentrano i contratti nello spazio prezzo-scadenza. Le aree più luminose indicano una maggiore densità. Si può vedere come i contratti basati sul 'prezzo più basso' (in blu) tendano a concentrarsi su valori più bassi, mentre i contratti 'multifattoriali' (in rosso) sono più sparsi, coprendo anche nicchie di progetti ad alto valore e lunga durata."
+            }
+        }
+
+        plot_files = sorted([f for f in os.listdir(PLOTS_DIR) if f.endswith('.png') and f in plot_info])
 
         with PdfPages(output_path) as pdf:
-            # Cover page
-            fig = plt.figure(figsize=(11.69, 8.27))
-            fig.text(0.5, 0.6, 'PPP Portugal - Report di Analisi', ha='center', fontsize=20, weight='bold')
-            fig.text(0.5, 0.5, 'Questo report contiene le visualizzazioni chiave generate durante l\'analisi.', ha='center', fontsize=12)
-            fig.text(0.5, 0.4, f'Totale righe analizzate: {len(self.df):,}', ha='center', fontsize=10)
+            # Pagina di copertina
+            fig = plt.figure(figsize=(11.69, 8.27)) # A4 Landscape
+            fig.text(0.5, 0.65, report_title, ha='center', fontsize=24, weight='bold')
+            fig.text(0.5, 0.55, 'Un\'analisi narrativa basata sui dati degli appalti pubblici portoghesi', ha='center', fontsize=14)
+            fig.text(0.5, 0.45, f'Data del report: {pd.Timestamp.now().strftime("%d-%m-%Y")}', ha='center', fontsize=10)
+            fig.text(0.5, 0.35, f'Numero totale di contratti analizzati: {len(self.df):,}', ha='center', fontsize=10)
             pdf.savefig(fig)
             plt.close(fig)
 
-            # Add plots
+            # Aggiungi una pagina per ogni grafico con descrizione
             for fname in plot_files:
+                info = plot_info[fname]
+                
+                # Pagina di testo
+                fig = plt.figure(figsize=(11.69, 8.27))
+                fig.text(0.1, 0.9, info['title'], fontsize=18, weight='bold')
+                
+                # A capo automatico del testo
+                wrapped_text = '\n'.join(textwrap.wrap(info['description'], width=100))
+                fig.text(0.1, 0.8, wrapped_text, fontsize=12, va='top')
+                
+                pdf.savefig(fig)
+                plt.close(fig)
+                
+                # Pagina con il grafico
+                fig = plt.figure(figsize=(11.69, 8.27))
                 try:
-                    fig = plt.figure(figsize=(11.69, 8.27))
-                    img = plt.imread(os.path.join(PLOTS_DIR, fname))
+                    img_path = os.path.join(PLOTS_DIR, fname)
+                    img = plt.imread(img_path)
                     plt.imshow(img)
                     plt.axis('off')
-                    plt.title(fname.replace('_', ' ').replace('.png', '').title(), pad=20)
+                    plt.title(info['title'], pad=20, fontsize=14)
                     pdf.savefig(fig)
-                    plt.close(fig)
                 except Exception as e:
-                    print(f"Impossibile aggiungere {fname} al PDF: {e}")
-        print(f"Report PDF generato.")
+                    print(f"Impossibile aggiungere l'immagine {fname} al PDF: {e}")
+                finally:
+                    plt.close(fig)
+
+        print(f"Report PDF narrativo generato con successo.")
         
 # %% [markdown]
 # ## Esecuzione della Pipeline di Storytelling
@@ -825,7 +907,7 @@ preprocessor.generate_pdf_report()
 # 
 # **Finding**:
 # - **Distribuzione Prezzi**: Il box plot mostra che, sebbene i contratti "multifattoriali" abbiano una mediana dei prezzi leggermente più alta, la variabilità è enorme in entrambi i casi. Questo suggerisce che il tipo di progetto ha un impatto maggiore sul prezzo rispetto al solo criterio di aggiudicazione.
-# - **Distribuzione Geografica**: Il grafico a barre rivela che la maggior parte dei distretti si affida prevalentemente al criterio del "prezzo più basso". Tuttavia, in centri urbani come Lisbona, la proporzione di contratti "multifattoriali" è visibilmente più alta, indicando una maggiore attenzione alla qualità e ad altri fattori oltre al costo.
+# - **Distribuzione Geografica**: Il grafico a barre rivela che la maggior parte dei distretti si affida prevalentemente al criterio del "prezzo più basso". Tuttavia, in centri urbani come Lisbona, la proporzione di contratti "multifattoriali" è visibilmente più alta, indicando una maggiore attenzione alla qualità e altri fattori oltre al costo.
 # - **Prezzo vs. Scadenza**: Lo scatter plot interattivo conferma che non esiste una regola semplice. Ci sono progetti "multifattoriali" economici e veloci, e progetti basati sul "prezzo più basso" che sono costosi e lunghi. Questo rafforza l'idea che le dinamiche di costo sono complesse e dipendono da molteplici fattori.
 
 # %% [code]
