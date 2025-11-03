@@ -1,15 +1,4 @@
 ﻿# %% [markdown]
-# # Fase 1: Pulizia e Preparazione del Dataset
-# **Obiettivo**: Trasformare i dati grezzi in un dataset strutturato, pulito e affidabile.
-#
-# **Perché è importante**: La qualità di qualsiasi analisi dei dati dipende in modo critico dalla qualità dei dati di input. Un preprocessing accurato permette di:
-# - **Rimuovere il "rumore"**: Eliminare informazioni irrilevanti o errate che potrebbero distorcere i risultati.
-# - **Standardizzare i formati**: Garantire che i dati siano coerenti (es. date, valori booleani).
-# - **Gestire i dati mancanti**: Decidere strategicamente come trattare le lacune nel dataset per non perdere informazioni preziose.
-# - **Creare feature significative**: Arricchire il dataset con nuove variabili (feature) che possono rivelare pattern nascosti.
-#
-# In questa fase, ogni passaggio è documentato per spiegare cosa viene fatto e perché, garantendo la trasparenza e la riproducibilità dell'analisi.
-
 # %% [markdown]
 # ## 1. Setup dell'Ambiente
 # **Obiettivo**: Caricare tutte le librerie necessarie e configurare le variabili globali.
@@ -734,7 +723,7 @@ class DataVisualizer:
                 geo_metrics,
                 geojson=districts_geojson,
                 locations=district_col,
-                featureidkey='properties.name',
+                featureidkey='properties.dis_name',
                 color='base_bid_mean',
                 color_continuous_scale='Viridis',
                 mapbox_style='carto-positron',
@@ -1020,7 +1009,7 @@ class DataVisualizer:
         try:
             fig_map = px.choropleth_mapbox(
                 geo_metrics, geojson=districts_geojson, locations=district_col,
-                featureidkey='properties.name', color='contracts',
+                featureidkey='properties.dis_name', color='contracts',
                 color_continuous_scale='Plasma', mapbox_style='carto-positron',
                 zoom=5.5, center={'lat': 39.5, 'lon': -8.0}, opacity=0.7,
                 hover_data={'contracts': True}
@@ -1297,7 +1286,7 @@ class DataVisualizer:
         
 
     def generate_pdf_report(self, report_title: str = 'PPP Portugal - Report di Analisi Narrativa', output_path: str = None):
-        """Genera un report PDF narrativo con ReportLab."""
+        """Genera un report PDF narrativo con ReportLab, includendo riferimenti ai grafici HTML."""
         if SimpleDocTemplate is None:
             print("ReportLab non trovato. Salto generazione PDF.")
             return
@@ -1306,15 +1295,33 @@ class DataVisualizer:
             output_path = os.path.join(PLOTS_DIR, 'PPP_narrative_report.pdf')
         print(f"\n--- Generazione Report PDF Narrativo: {output_path} ---")
 
-        # Mappatura nomi file -> titoli e descrizioni (impersonali)
         plot_info = {
+            # --- Grafici di Preprocessing ---
+            '01_missing_values_percentage.png': {
+                "title": "Analisi Preliminare: Valori Mancanti",
+                "description": "Questo grafico mostra la percentuale di dati mancanti per ogni colonna. Colonne con un'alta percentuale di valori nulli (es. 'Conclusion of a framework agreement') sono state rimosse perché non avrebbero fornito insight affidabili. Questa fase è cruciale per garantire la robustezza dell'analisi."
+            },
+            '02a_distribution_before_outlier_diference_between_close_and_signing_dates.png': {
+                "title": "Analisi Preliminare: Distribuzione 'Differenza Date' (Grezza)",
+                "description": "Visualizzazione della distribuzione iniziale della differenza di giorni tra chiusura e firma. La presenza di una coda lunga (outlier) è evidente nel box plot, giustificando la successiva fase di pulizia per stabilizzare le analisi."
+            },
+            '02a_distribution_before_outlier_execution_deadline_(days).png': {
+                "title": "Analisi Preliminare: Distribuzione 'Scadenza Esecuzione' (Grezza)",
+                "description": "Visualizzazione della distribuzione iniziale dei giorni di scadenza. Come per la differenza date, la distribuzione è fortemente asimmetrica a destra, con outlier estremi che vengono rimossi per non distorcere le medie e le visualizzazioni successive."
+            },
+            '04_key_features_distribution.png': {
+                "title": "Distribuzione delle Feature Chiave Discretizzate",
+                "description": "Questi grafici mostrano come si distribuiscono alcune delle variabili più importanti dopo la pulizia e la discretizzazione. Si conferma che la maggior parte dei contratti usa il 'prezzo più basso' e rientra nelle categorie 'Low' per prezzo e 'Short' per durata."
+            },
+            
+            # --- Grafici di Storytelling Principale ---
             '10_kpi_dashboard.png': {
                 "title": "Dashboard Riepilogativa (KPI)",
-                "description": "La dashboard principale fornisce una visione d'insieme. Si evidenziano i KPI (Key Performance Indicators) come il numero totale di contratti, il valore medio e la durata media. I grafici di supporto mostrano i distretti principali per valore, la distribuzione dei prezzi e l'andamento temporale aggregato, offrendo un sommario esecutivo dell'intero dataset."
+                "description": "La dashboard principale fornisce una visione d'insieme. Si evidenziano i KPI (Key Performance Indicators) come il numero totale di contratti, il valore medio e la durata media. I grafici di supporto mostrano i distretti principali per valore, la distribuzione dei prezzi e l'andamento temporale aggregato."
             },
             '07_temporal_heatmap.png': {
                 "title": "Analisi di Stagionalità (Heatmap)",
-                "description": "Questa heatmap analizza la distribuzione dei contratti nel corso dei mesi e degli anni. Si possono identificare pattern stagionali: ad esempio, una maggiore attività di appalto in certi periodi dell'anno (es. fine o inizio anno fiscale) rispetto ad altri (es. agosto). Queste informazioni sono utili per la pianificazione delle risorse."
+                "description": "Questa heatmap analizza la distribuzione dei contratti nel corso dei mesi e degli anni. Si possono identificare pattern stagionali: ad esempio, una maggiore attività di appalto in certi periodi dell'anno (es. fine o inizio anno fiscale) rispetto ad altri (es. agosto)."
             },
             '08_stacked_area_value_evolution.png': {
                 "title": "Evoluzione del Valore Totale per Criterio",
@@ -1322,19 +1329,31 @@ class DataVisualizer:
             },
             '03_district_distribution.png': {
                 "title": "Distribuzione Geografica dei Contratti (Volume)",
-                "description": "Il grafico a barre orizzontali illustra il numero totale di contratti per distretto, ordinati per volume. Emerge una chiara concentrazione nelle aree metropolitane di Lisbona e Porto, che sono i principali centri economici del paese, indicando dove si concentra la maggior parte delle attività di costruzione."
+                "description": "Il grafico a barre orizzontali illustra il numero totale di contratti per distretto, ordinati per volume. Emerge una chiara concentrazione nelle aree metropolitane di Lisbona e Porto, che sono i principali centri economici del paese."
             },
-            '17_map_contracts_by_district.html': { # Nota: questo è HTML, ma lo includiamo per completezza
-                "title": "Mappa Geografica (Volume Contratti)",
-                "description": "Questa mappa coropletica (visualizzazione interattiva) conferma geograficamente i dati del grafico a barre. Le aree più scure indicano un maggior numero di contratti, rinforzando l'evidenza della concentrazione su Lisbona e Porto."
+            
+            # --- GRAFICI HTML ---
+            '17_map_contracts_by_district.html': { 
+                "title": "Mappa Geografica (Volume Contratti) - [Interattivo]",
+                "description": "Questa mappa coropletica (visualizzazione interattiva) conferma geograficamente i dati del grafico a barre. Le aree più scure indicano un maggior numero di contratti, rinforzando l'evidenza della concentrazione su Lisbona e Porto. (Grafico HTML disponibile nella cartella 'plots/')"
             },
-             '05_map_base_bid_by_district.html': { # Nota: questo è HTML
-                "title": "Mappa Geografica (Valore Medio)",
-                "description": "Contrariamente alla mappa del volume, questa visualizzazione (interattiva) mostra il *valore medio* dei contratti. Emerge un pattern interessante: distretti con *meno* contratti (es. Bragança) possono avere un valore medio *più alto*, suggerendo la presenza di pochi ma grandi progetti infrastrutturali."
+             '05_map_base_bid_by_district.html': { 
+                "title": "Mappa Geografica (Valore Medio) - [Interattivo]",
+                "description": "Contrariamente alla mappa del volume, questa visualizzazione (interattiva) mostra il *valore medio* dei contratti. Emerge un pattern interessante: distretti con *meno* contratti (es. Bragança) possono avere un valore medio *più alto*, suggerendo la presenza di pochi ma grandi progetti infrastrutturali. (Grafico HTML disponibile nella cartella 'plots/')"
             },
+            '09_treemap_budget_distribution.html': {
+                "title": "Treemap Distribuzione Budget (Distretto/Criterio) - [Interattivo]",
+                "description": "Questo Treemap interattivo mostra come il budget totale è allocato. I rettangoli più grandi (es. Lisbona) rappresentano la quota maggiore del budget. All'interno di ogni distretto, la suddivisione per criterio mostra come quel budget è distribuito. (Grafico HTML disponibile nella cartella 'plots/')"
+            },
+            '13_cpvs_sem_semantic_clusters.html': {
+                "title": "Cluster Semantici (Analisi Testuale) - [Interattivo]",
+                "description": "Questa visualizzazione interattiva (basata su PCA e K-Means) raggruppa i contratti in base al significato semantico della loro descrizione. I cluster separati (es. cluster 0 vs cluster 1) rappresentano gruppi tematici distinti, come 'grandi lavori di costruzione' vs 'servizi di consulenza e progettazione'. (Grafico HTML disponibile nella cartella 'plots/')"
+            },
+            # --- Fine Grafici HTML ---
+
             '21_award_criteria_by_district.png': {
                 "title": "Analisi Criteri di Aggiudicazione per Distretto",
-                "description": "Questo grafico combina la dimensione geografica con quella decisionale. Mostra come la maggior parte dei distretti si affidi prevalentemente al 'prezzo più basso'. Tuttavia, in centri urbani come Lisbona, la proporzione di contratti 'multifattoriali' è visibilmente più alta, indicando una maggiore attenzione alla qualità."
+                "description": "Questo grafico combina la dimensione geografica con quella decisionale. Mostra come la maggior parte dei distretti si affidi prevalentemente al 'prezzo più basso'. Tuttavia, in centri urbani come Lisbona, la proporzione di contratti 'multifattoriali' è visibilmente più alta."
             },
             '09_award_criteria_donut.png': {
                 "title": "Distribuzione dei Criteri di Aggiudicazione",
@@ -1342,47 +1361,43 @@ class DataVisualizer:
             },
             '10_price_distribution_by_award_criteria_boxen.png': {
                 "title": "Distribuzione Prezzi per Criterio (Boxen Plot)",
-                "description": "Il Boxen Plot (un'evoluzione del box plot) confronta la distribuzione dei prezzi. Entrambi i criteri mostrano una grande dispersione. I contratti 'multifattoriali' hanno una mediana leggermente più alta, ma la variabilità è tale che il tipo di progetto (es. 'costruzione' vs 'manutenzione') è probabilmente un driver di costo più forte del solo criterio."
+                "description": "Il Boxen Plot confronta la distribuzione dei prezzi. Entrambi i criteri mostrano una grande dispersione. I contratti 'multifattoriali' hanno una mediana leggermente più alta, ma la variabilità è tale che il tipo di progetto è probabilmente un driver di costo più forte del solo criterio."
             },
-             '18_price_intensity_kde.png': {
-                 "title": "Analisi Intensità Progetto (Prezzo vs. Costo/Giorno)",
-                 "description": "Questo grafico di densità (KDE) su scala logaritmica mostra dove si concentrano i contratti. Le aree più scure indicano una maggiore densità. Permette di identificare i tipi di contratto più comuni: la maggior parte si concentra su prezzi bassi e costi giornalieri bassi (probabilmente manutenzione)."
-             },
+            '18_price_intensity_kde.png': {
+                "title": "Analisi Intensità Progetto (Prezzo vs. Costo/Giorno)",
+                "description": "Questo grafico di densità (KDE) su scala logaritmica mostra dove si concentrano i contratti. Le aree più scure indicano una maggiore densità. La maggior parte si concentra su prezzi bassi e costi giornalieri bassi (probabilmente manutenzione)."
+            },
             '06_wordcloud_cpvs.png': {
                 "title": "Temi Principali (Word Cloud CPVS)",
-                "description": "La nuvola di parole evidenzia i termini più frequenti nelle descrizioni CPVS (le categorie dei lavori). Termini come 'lavori', 'costruzione', 'manutenzione' dominano, confermando il focus del dataset sul settore edile e infrastrutturale. La dimensione delle parole è proporzionale alla loro frequenza."
+                "description": "La nuvola di parole evidenzia i termini più frequenti nelle descrizioni CPVS (le categorie dei lavori). Termini come 'lavori', 'costruzione', 'manutenzione' dominano, confermando il focus del dataset sul settore edile e infrastrutturale."
             },
-             '13_cpvs_sem_semantic_clusters.html': { # Nota: questo è HTML
-                "title": "Cluster Semantici (Analisi Testuale)",
-                "description": "Questa visualizzazione interattiva (basata su PCA e K-Means) raggruppa i contratti in base al significato semantico della loro descrizione. I cluster separati (es. cluster 0 vs cluster 1) rappresentano gruppi tematici distinti, come 'grandi lavori di costruzione' vs 'servizi di consulenza e progettazione'."
-            },
-             '11_temporal_trends.png': {
+            '11_temporal_trends.png': {
                 "title": "Andamento Temporale (Contratti vs Prezzo Medio)",
-                "description": "Questo grafico a doppia scala mostra l'evoluzione del numero di contratti (blu) e del prezzo medio (rosso). Si possono notare picchi nel volume dei contratti in determinati periodi (es. 2009-2010), non sempre accompagnati da un aumento del prezzo medio, suggerendo variazioni nella tipologia dei progetti."
+                "description": "Questo grafico a doppia scala mostra l'evoluzione del numero di contratti (blu) e del prezzo medio (rosso). Si possono notare picchi nel volume dei contratti in determinati periodi (es. 2009-2010), non sempre accompagnati da un aumento del prezzo medio."
             },
             '12_correlation_heatmap_enhanced.png': {
                 "title": "Matrice di Correlazione (Feature Numeriche)",
-                "description": "La heatmap visualizza le correlazioni lineari (coefficiente di Pearson). Una correlazione vicina a 1 (verde) o -1 (rosso) indica una forte relazione. Si nota una debole correlazione positiva tra prezzo e scadenza. L'assenza di correlazioni forti suggerisce che le relazioni tra le variabili sono complesse."
+                "description": "La heatmap visualizza le correlazioni lineari (coefficiente di Pearson). Si nota una debole correlazione positiva tra prezzo e scadenza. L'assenza di correlazioni forti suggerisce che le relazioni tra le variabili sono complesse."
             },
             '14_financial_stacked_bar_value_by_year.png': {
                 "title": "Analisi Finanziaria: Valore Contratti per Anno e Criterio",
-                "description": "Questo grafico a barre impilate, utile per un'analisi finanziaria, mostra il valore totale (€) dei contratti per anno, suddiviso per criterio. Permette di osservare se c'è stato uno spostamento nel tempo del valore aggregato dai contratti basati sul 'prezzo più basso' a quelli 'multifattoriali'."
+                "description": "Questo grafico a barre impilate, utile per un'analisi finanziaria, mostra il valore totale (€) dei contratti per anno, suddiviso per criterio. Permette di osservare se c'è stato uno spostamento nel tempo del valore aggregato."
             },
              '15_financial_price_vs_eu_publication.png': {
                  "title": "Analisi Finanziaria: Confronto Prezzi per Pubblicazione EU",
-                 "description": "Questo box plot confronta la distribuzione dei prezzi base (in scala log) tra i contratti pubblicati nella Gazzetta UE e quelli non pubblicati. I contratti pubblicati (1) mostrano una mediana e una dispersione significativamente più elevate, confermando che si tratta di appalti di valore superiore."
+                 "description": "Questo box plot confronta la distribuzione dei prezzi (in scala log) tra i contratti pubblicati nella Gazzetta UE (1) e quelli non pubblicati (0). I contratti pubblicati mostrano una mediana e una dispersione significativamente più elevate."
              },
             '16_manager_avg_deadline_by_district.png': {
                 "title": "Analisi Gestionale: Scadenza Media per Distretto",
-                "description": "Questo grafico orizzontale, rilevante per la gestione progettuale, evidenzia come la durata media dei progetti (scadenza) vari in modo significativo da un distretto all'altro. Distretti con scadenze medie più lunghe (es. Beja, Bragança) potrebbero presentare maggiori complessità logistiche o burocratiche."
+                "description": "Questo grafico orizzontale, rilevante per la gestione progettuale, evidenzia come la durata media dei progetti (scadenza) vari in modo significativo da un distretto all'altro. Distretti con scadenze medie più lunghe potrebbero presentare maggiori complessità."
             }
         }
 
-        # Ottieni i file PNG ordinati come nella mappatura
-        plot_files_ordered = [f for f in plot_info.keys() if f.endswith('.png') and os.path.exists(os.path.join(PLOTS_DIR, f))]
+        # Ottieni TUTTI i file definiti in plot_info (sia .png che .html)
+        plot_files_ordered = [f for f in plot_info.keys() if os.path.exists(os.path.join(PLOTS_DIR, f))]
 
         if not plot_files_ordered:
-            print("Nessun file PNG corrispondente trovato in PLOTS_DIR per generare il report.")
+            print("Nessun file PNG o HTML corrispondente trovato in PLOTS_DIR per generare il report.")
             return
 
         doc = SimpleDocTemplate(output_path, pagesize=landscape(A4))
@@ -1399,7 +1414,6 @@ class DataVisualizer:
         story.append(Paragraph(f'Numero totale di contratti analizzati nel dataset finale: {len(self.df):,}', styles['Normal']))
         story.append(PageBreak())
 
-        # Aggiungi pagine per ogni grafico
         for fname in plot_files_ordered:
             info = plot_info[fname]
             img_path = os.path.join(PLOTS_DIR, fname)
@@ -1410,26 +1424,33 @@ class DataVisualizer:
             story.append(desc_paragraph)
             story.append(Spacer(1, 0.2*inch))
 
-            try:
-                # Ridimensiona immagine per adattarla alla pagina
-                with PILImage.open(img_path) as img_pil:
-                    width_px, height_px = img_pil.size
-                max_width = 8*inch # A4 Orizzontale (11.7) - margini
-                max_height = 5*inch # A4 Orizzontale (8.3) - margini
-                ratio = min(max_width / width_px, max_height / height_px)
-                img_width = width_px * ratio
-                img_height = height_px * ratio
+            if fname.endswith('.png'):
+                try:
+                    with PILImage.open(img_path) as img_pil:
+                        width_px, height_px = img_pil.size
+                    
+                    max_width = 9.5 * inch
+                    max_height = 5.8 * inch
+                    
+                    ratio = min(max_width / width_px, max_height / height_px)
+                    img_width = width_px * ratio
+                    img_height = height_px * ratio
 
-                img_reportlab = Image(img_path, width=img_width, height=img_height)
-                img_reportlab.hAlign = 'CENTER' # Centra l'immagine
-                story.append(img_reportlab)
-                story.append(PageBreak())
-            except Exception as e:
-                print(f"Errore durante l'aggiunta dell'immagine {fname} al PDF: {e}")
-                story.append(Paragraph(f"(Errore nel caricamento immagine {fname})", styles['Italic']))
-                story.append(PageBreak())
+                    img_reportlab = Image(img_path, width=img_width, height=img_height)
+                    img_reportlab.hAlign = 'CENTER' # Centra l'immagine
+                    story.append(img_reportlab)
+                except Exception as e:
+                    print(f"Errore durante l'aggiunta dell'immagine {fname} al PDF: {e}")
+                    story.append(Paragraph(f"(Errore nel caricamento immagine {fname})", styles['Italic']))
+            
+            elif fname.endswith('.html'):
+                story.append(Spacer(1, 0.5*inch))
+                placeholder_text = f"<i>Nota: Questo è un grafico interattivo (HTML). Aprire il file <b>'{fname}'</b> nella cartella 'plots/' per l'esplorazione.</i>"
+                story.append(Paragraph(placeholder_text, styles['Italic']))
+                story.append(Spacer(1, 0.5*inch))
 
-        # Costruisci il PDF
+            story.append(PageBreak())
+
         try:
             doc.build(story)
             print(f"Report PDF narrativo generato con successo: {output_path}")
