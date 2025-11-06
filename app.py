@@ -55,7 +55,7 @@ st.markdown(f"""
 
 # --- Costanti ---
 
-DATA_FILE_PATH: str = 'Datasets/PPPData_EN_cleaned.csv'
+DATA_FILE_PATH: str = 'Datasets/PPPData_EN_cleaned_2.csv'
 GEOJSON_PATH_1: str = 'Datasets/portugal_districts.geojson'
 GEOJSON_PATH_2: str = 'Datasets/georef-portugal-distrito-millesime.json'
 PLOTS_DIR: str = 'plots'
@@ -308,6 +308,32 @@ class FinancialDashboard:
         st.dataframe(stats_display.set_index('District'), width='stretch')
 
     @staticmethod
+    def _render_budget_treemap(df: pd.DataFrame, district_col: str, criteria_col: str, price_col: str) -> None:
+        st.markdown("### Allocazione Budget Gerarchica (Distretto → Criterio)")
+        
+        # Preparazione dati
+        tree_data = df.groupby([district_col, criteria_col])[price_col].sum().reset_index()
+        tree_data.columns = ['Distretto', 'Criterio', 'Valore']
+        tree_data = tree_data[tree_data['Valore'] > 0] # Filtro valori positivi
+
+        if tree_data.empty:
+            st.warning("Dati insufficienti per generare la Treemap con i filtri correnti.")
+            return
+
+        try:
+            fig = px.treemap(tree_data, path=['Distretto', 'Criterio'], values='Valore',
+                             title="Allocazione Budget: Distretto → Criterio Aggiudicazione",
+                             color='Valore', color_continuous_scale='Blues',
+                             hover_data={'Valore': ':,.0f'})
+            fig.update_traces(textinfo='label+value+percent parent',
+                              marker=dict(line=dict(width=2, color='white')))
+            fig.update_layout(height=600, margin=dict(t=50, b=0, l=0, r=0))
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.warning(f"Impossibile generare la Treemap per questa specifica combinazione di filtri. (Errore: {e})")
+
+    @staticmethod
     def render(df: pd.DataFrame) -> None:
         st.markdown("## Analisi Finanziaria")
         price_col = 'Base Bid Price (€)'
@@ -325,6 +351,9 @@ class FinancialDashboard:
         
         if price_day_col in df.columns and deadline_col in df.columns:
             FinancialDashboard._render_price_intensity(df, price_col, deadline_col, price_day_col, criteria_col)
+        
+        if 'District' in df.columns and criteria_col in df.columns:
+            FinancialDashboard._render_budget_treemap(df, 'District', criteria_col, price_col)
         
         if 'District' in df.columns:
             FinancialDashboard._render_financial_metrics_table(df, price_col)
@@ -369,9 +398,24 @@ class TemporalDashboard:
         st.plotly_chart(fig, use_container_width=True)
 
     @staticmethod
+    def _render_criteria_evolution(df: pd.DataFrame, year_col: str, criteria_col: str, price_col: str) -> None:
+        st.markdown("### Evoluzione Criteri di Aggiudicazione nel Tempo")
+        evolution = df.groupby([year_col, criteria_col])[price_col].sum().reset_index()
+        evolution.columns = ['Anno', 'Criterio', 'Valore Totale']
+        
+        fig = px.area(evolution, x='Anno', y='Valore Totale', color='Criterio',
+                      title="Evoluzione Composizione Mercato per Criterio",
+                      color_discrete_sequence=px.colors.qualitative.Set2)
+        fig.update_layout(height=500, hovermode='x unified',
+                          yaxis_title="Valore Totale (€)",
+                          legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5))
+        st.plotly_chart(fig, use_container_width=True)
+
+    @staticmethod
     def render(df: pd.DataFrame) -> None:
         st.markdown("## Analisi Temporale")
         year_col, month_col, price_col = 'Publication Year', 'Publication Month', 'Base Bid Price (€)'
+        criteria_col = 'Award criteria class'
         
         if year_col not in df.columns:
             st.warning("Colonna 'Publication Year' non trovata."); return
@@ -386,7 +430,9 @@ class TemporalDashboard:
         
         if month_col in df.columns:
             TemporalDashboard._render_seasonal_heatmap(df, year_col, month_col)
-
+        
+        if criteria_col in df.columns and price_col in df.columns:
+            TemporalDashboard._render_criteria_evolution(df, year_col, criteria_col, price_col)
 
 class GeographicDashboard:
     @staticmethod
@@ -560,13 +606,17 @@ class TextAnalysisDashboard:
 
         df_keywords = frequencies.reset_index()
         df_keywords.columns = ['Keyword', 'Numero di Contratti']
-        df_keywords['Numero di Contratti'] = df_keywords['Numero di Contratti'].fillna(0)
-
-        if df_keywords['Numero di Contratti'].sum() == 0:
+        
+        # Clean data: remove NaN and ensure numeric values
+        df_keywords['Numero di Contratti'] = pd.to_numeric(df_keywords['Numero di Contratti'], errors='coerce').fillna(0)
+        df_keywords = df_keywords[df_keywords['Numero di Contratti'] > 0]
+        
+        total_contracts = df_keywords['Numero di Contratti'].sum()
+        if total_contracts == 0 or pd.isna(total_contracts):
             st.warning("Nessun dato valido per creare il grafico a torta.")
             return
 
-        df_keywords['Percentuale'] = (df_keywords['Numero di Contratti'] / df_keywords['Numero di Contratti'].sum()) * 100
+        df_keywords['Percentuale'] = (df_keywords['Numero di Contratti'] / total_contracts) * 100
 
         fig = px.pie(
             df_keywords,
@@ -585,10 +635,17 @@ class TextAnalysisDashboard:
             st.warning("Nessuna keyword da visualizzare nella WordCloud.")
             return
 
-        # Rimuove valori non numerici o NaN prima di creare la WordCloud
-        freq_dict = frequencies.dropna()
-        freq_dict = freq_dict[freq_dict > 0].to_dict()
-
+        # Clean data: remove NaN, inf, and non-positive values
+        freq_clean = frequencies.replace([np.inf, -np.inf], np.nan).dropna()
+        freq_clean = freq_clean[freq_clean > 0]
+        
+        if freq_clean.empty:
+            st.warning("Nessuna keyword valida per generare la WordCloud.")
+            return
+        
+        # Convert to dict with proper numeric values
+        freq_dict = {str(k): float(v) for k, v in freq_clean.items() if pd.notna(v) and v > 0}
+        
         if not freq_dict:
             st.warning("Nessuna keyword valida per generare la WordCloud.")
             return
@@ -633,12 +690,17 @@ class DataExplorer:
     @staticmethod
     def _render_info(df: pd.DataFrame) -> None:
         st.markdown(f"### Informazioni Colonne ({len(df.columns)} Colonne)")
+        
+        # Prevent division by zero
+        total_rows = len(df) if len(df) > 0 else 1
+        percentuale_nulli = ((df.isnull().sum() / total_rows) * 100).round(2).values
+        
         col_info = pd.DataFrame({
             'Colonna': df.columns,
             'Tipo Dati': df.dtypes.values.astype(str), # Correzione PyArrow
             'Valori Non-Nulli': df.count().values,
             'Valori Unici': df.nunique().values,
-            'Percentuale Nulli': ((df.isnull().sum() / len(df)) * 100).round(2).values
+            'Percentuale Nulli': percentuale_nulli
         })
         st.dataframe(col_info.set_index('Colonna'), width='stretch')
 
