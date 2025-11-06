@@ -56,8 +56,7 @@ st.markdown(f"""
 # --- Costanti ---
 
 DATA_FILE_PATH: str = 'Datasets/PPPData_EN_cleaned_2.csv'
-GEOJSON_PATH_1: str = 'Datasets/portugal_districts.geojson'
-GEOJSON_PATH_2: str = 'Datasets/georef-portugal-distrito-millesime.json'
+GEOJSON_PATH_1: str = 'Datasets/georef-portugal-distrito.geojson'
 PLOTS_DIR: str = 'plots'
 WORDCLOUD_IMG: str = '06_wordcloud_cpvs.png'
 
@@ -101,10 +100,8 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
 @st.cache_data
 def load_geojson() -> Tuple[Optional[Dict], Optional[str]]:
     path_to_use, key_to_use = None, None
-    if os.path.exists(GEOJSON_PATH_1):
-        path_to_use, key_to_use = GEOJSON_PATH_1, 'properties.NAME_1'
-    elif os.path.exists(GEOJSON_PATH_2):
-        path_to_use, key_to_use = GEOJSON_PATH_2, 'properties.dis_name'
+    if os.path.exists(GEOJSON_PATH_1): 
+        path_to_use, key_to_use = GEOJSON_PATH_1, 'properties.dis_name'
     else:
         st.warning("File GeoJSON non trovato in `Datasets/`. Le mappe saranno disabilitate.")
         return None, None
@@ -438,32 +435,51 @@ class GeographicDashboard:
     @staticmethod
     def _render_maps(df: pd.DataFrame, geojson: Dict, key: str, price_col: str, district_col: str) -> None:
         st.markdown("### Mappe Interattive dei Distretti")
-        col1, col2 = st.columns(2)
-        metrics = df.groupby(district_col).agg(
+
+        # 1. Adatta il DataFrame al GeoJSON
+        df_map = df.copy()
+        df_map[district_col] = df_map[district_col].replace({
+            'Região Autónoma dos Açores': 'Açores',
+            'Região Autónoma da Madeira': 'Madeira'
+        })
+
+        # 2. Aggrega i dati
+        metrics = df_map.groupby(district_col).agg(
             Contracts=(district_col, 'size'),
             Average_Value=(price_col, 'mean'),
             Total_Value=(price_col, 'sum')
         ).reset_index()
-        
-        hover_data = {'Contracts': True, 'Average_Value': ':.0f', 'Total_Value': ':,.0f'}
-        base_map_args = dict(geojson=geojson, locations=district_col, featureidkey=key,
-                             mapbox_style='carto-positron', zoom=5.5, 
-                             center={'lat': 39.5, 'lon': -8.0}, opacity=0.7,
-                             hover_name=district_col, hover_data=hover_data)
 
-        with col1:
-            fig_vol = px.choropleth_mapbox(metrics, color='Contracts',
-                                         color_continuous_scale='Plasma',
-                                         title="Volume Contratti per Distretto", **base_map_args)
-            fig_vol.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
-            st.plotly_chart(fig_vol, use_container_width=True)
+        # 3. Calcolo rapido centroidi per le etichette
+        cents = {'lat': [], 'lon': [], 'txt': []}
+        target_districts = set(metrics[district_col])
+        for f in geojson.get('features', []):
+            if (name := f['properties'].get('dis_name')) in target_districts:
+                g = f['geometry']
+                # Appiattisce Poligoni e MultiPoligoni per trovare il centro medio
+                coords = [pt for poly in (g['coordinates'] if g['type'] == 'MultiPolygon' else [g['coordinates']]) for ring in poly for pt in ring]
+                cents['lon'].append(sum(c[0] for c in coords) / len(coords))
+                cents['lat'].append(sum(c[1] for c in coords) / len(coords))
+                cents['txt'].append(name)
 
-        with col2:
-            fig_val = px.choropleth_mapbox(metrics, color='Average_Value',
-                                         color_continuous_scale='Viridis',
-                                         title="Valore Medio (€) per Distretto", **base_map_args)
-            fig_val.update_layout(margin={"r":0,"t":40,"l":0,"b":0})
-            st.plotly_chart(fig_val, use_container_width=True)
+        # 4. Funzione di plotting
+        def _plot(col, metric, title, color_scale='Teal'):
+            fig = px.choropleth_mapbox(metrics, locations=district_col, color=metric,
+                                       geojson=geojson, featureidkey=key,
+                                       color_continuous_scale=color_scale, title=title,
+                                       mapbox_style='carto-positron', zoom=5.5,
+                                       center={'lat': 39.5, 'lon': -8.0}, opacity=0.7,
+                                       hover_data={'Contracts': True, 'Average_Value': ':.0f', 'Total_Value': ':,.0f'})
+            if cents['txt']:
+                fig.add_scattermapbox(lat=cents['lat'], lon=cents['lon'], text=cents['txt'],
+                                      mode='text', textfont=dict(color='black', size=9),
+                                      hoverinfo='skip', showlegend=False)
+            fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=400)
+            col.plotly_chart(fig, use_container_width=True)
+
+        c1, c2 = st.columns(2)
+        _plot(c1, 'Contracts', "Volume Contratti")
+        _plot(c2, 'Average_Value', "Valore Medio (€)")
 
     @staticmethod
     def _render_bar_charts(df: pd.DataFrame, price_col: str, district_col: str) -> None:
